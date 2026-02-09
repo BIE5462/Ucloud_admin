@@ -310,5 +310,40 @@ async def change_user_balance(
     )
 
 
+@router.delete("/{user_id}", response_model=ResponseData)
+async def delete_user(
+    user_id: int,
+    current_admin=Depends(get_current_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """删除用户"""
+    user = await user_service.get_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+
+    # 检查用户是否有云电脑
+    container = await container_service.get_by_user_id(db, user_id)
+    if container:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该用户存在云电脑，请先删除云电脑后再删除用户",
+        )
+
+    # 记录日志
+    await log_service.create_admin_operation_log(
+        db,
+        current_admin.id,
+        "delete_user",
+        "user",
+        user_id,
+        old_value=f"{{phone: {user.phone}, company: {user.company_name}}}",
+        description=f"删除用户: {user.company_name}",
+    )
+
+    await user_service.delete(db, user)
+
+    return ResponseData(code=200, message="删除成功")
+
+
 # 导入BillingChargeRecord
 from app.models.models import BillingChargeRecord

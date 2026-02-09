@@ -53,11 +53,12 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="250" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
             <el-button type="success" size="small" @click="handleRecharge(row)">充值</el-button>
-            <el-button type="danger" size="small" @click="handleResetPassword(row)">重置密码</el-button>
+            <el-button type="warning" size="small" @click="handleResetPassword(row)">重置密码</el-button>
+            <el-button type="danger" size="small" @click="handleDelete(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -134,7 +135,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getUserList, createUser, updateUser, resetUserPassword, changeUserBalance } from '@/api'
+import { getUserList, createUser, updateUser, resetUserPassword, changeUserBalance, deleteUser } from '@/api'
 
 const loading = ref(false)
 const userList = ref([])
@@ -294,6 +295,26 @@ const handleResetPassword = async (row) => {
     })
   } catch {
     // 取消
+  }
+}
+
+const handleDelete = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除用户 "${row.company_name}" 吗？此操作不可恢复！`,
+      '危险操作',
+      {
+        type: 'error',
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+      }
+    )
+    
+    await deleteUser(row.id)
+    ElMessage.success('删除成功')
+    fetchData()
+  } catch {
+    // 取消或错误
   }
 }
 

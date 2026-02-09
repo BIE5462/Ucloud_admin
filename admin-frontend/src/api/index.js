@@ -73,11 +73,14 @@ export const updateUser = (id, data) =>
 export const resetUserPassword = (id, data) => 
   api.post(`/admin/users/${id}/reset-password`, data)
 
-export const changeUserBalance = (id, data) => 
+export const changeUserBalance = (id, data) =>
   api.post(`/admin/users/${id}/balance`, data)
 
-export const getUserDetail = (id) => 
+export const getUserDetail = (id) =>
   api.get(`/admin/users/${id}`)
+
+export const deleteUser = (id) =>
+  api.delete(`/admin/users/${id}`)
 
 // 管理员管理
 export const getAdminList = (params) => 

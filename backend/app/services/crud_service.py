@@ -123,6 +123,12 @@ class UserService:
 
         return total, users
 
+    @staticmethod
+    async def delete(db: AsyncSession, user: User) -> None:
+        """删除用户"""
+        await db.delete(user)
+        await db.commit()
+
 
 class AdminService:
     """管理员服务"""
