@@ -1,0 +1,314 @@
+from datetime import datetime, timedelta
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_, func, or_
+from typing import Optional
+
+from app.db.database import get_db
+from app.api.auth import get_current_admin, get_current_super_admin
+from app.schemas.schemas import (
+    ResponseData,
+    UserCreate,
+    UserUpdate,
+    UserInfo,
+    BalanceChange,
+    UserResetPassword,
+)
+from app.services.crud_service import (
+    user_service,
+    container_service,
+    config_service,
+    log_service,
+)
+from app.services.crud_service import admin_service
+from app.core.security import get_password_hash
+from app.models.models import User, ContainerRecord
+
+router = APIRouter(prefix="/admin/users", tags=["用户管理"])
+
+
+@router.get("", response_model=ResponseData)
+async def list_users(
+    page: int = 1,
+    page_size: int = 20,
+    keyword: Optional[str] = None,
+    status: Optional[int] = None,
+    current_admin=Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取用户列表"""
+    skip = (page - 1) * page_size
+    total, users = await user_service.list_users(db, skip, page_size, keyword, status)
+
+    # 获取容器状态信息
+    items = []
+    for user in users:
+        container = await container_service.get_by_user_id(db, user.id)
+        items.append(
+            {
+                "id": user.id,
+                "company_name": user.company_name,
+                "contact_name": user.contact_name,
+                "phone": user.phone,
+                "balance": user.balance,
+                "status": user.status,
+                "has_container": container is not None,
+                "container_status": container.status if container else None,
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+                "last_login_at": user.last_login_at.isoformat()
+                if user.last_login_at
+                else None,
+            }
+        )
+
+    return ResponseData(
+        code=200,
+        message="success",
+        data={"total": total, "page": page, "page_size": page_size, "items": items},
+    )
+
+
+@router.post("", response_model=ResponseData)
+async def create_user(
+    user_data: UserCreate,
+    current_admin=Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """创建用户"""
+    # 检查手机号是否已存在
+    existing = await user_service.get_by_phone(db, user_data.phone)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="手机号已存在"
+        )
+
+    user = await user_service.create(
+        db,
+        {
+            "company_name": user_data.company_name,
+            "contact_name": user_data.contact_name,
+            "phone": user_data.phone,
+            "password": user_data.password,
+            "initial_balance": user_data.initial_balance,
+        },
+    )
+
+    # 记录日志
+    await log_service.create_admin_operation_log(
+        db,
+        current_admin.id,
+        "create_user",
+        "user",
+        user.id,
+        new_value=f"{{phone: {user.phone}, company: {user.company_name}}}",
+        description=f"创建用户: {user.company_name}",
+    )
+
+    return ResponseData(
+        code=200, message="创建成功", data={"id": user.id, "phone": user.phone}
+    )
+
+
+@router.get("/{user_id}", response_model=ResponseData)
+async def get_user_detail(
+    user_id: int,
+    current_admin=Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取用户详情"""
+    user = await user_service.get_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+
+    container = await container_service.get_by_user_id(db, user_id)
+
+    # 统计信息
+    today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_query = select(func.sum(BillingChargeRecord.amount)).where(
+        and_(
+            BillingChargeRecord.user_id == user_id,
+            BillingChargeRecord.charge_minute >= today,
+        )
+    )
+    today_cost = await db.scalar(today_query) or 0
+
+    this_month = today.replace(day=1)
+    month_query = select(func.sum(BillingChargeRecord.amount)).where(
+        and_(
+            BillingChargeRecord.user_id == user_id,
+            BillingChargeRecord.charge_minute >= this_month,
+        )
+    )
+    this_month_cost = await db.scalar(month_query) or 0
+
+    return ResponseData(
+        code=200,
+        message="success",
+        data={
+            "user": {
+                "id": user.id,
+                "company_name": user.company_name,
+                "contact_name": user.contact_name,
+                "phone": user.phone,
+                "balance": user.balance,
+                "status": user.status,
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+                "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+                "last_login_at": user.last_login_at.isoformat()
+                if user.last_login_at
+                else None,
+            },
+            "container": {
+                "id": container.id,
+                "status": container.status,
+                "total_cost": container.total_cost,
+                "total_running_minutes": container.total_running_minutes,
+            }
+            if container
+            else None,
+            "statistics": {
+                "today_cost": today_cost,
+                "this_month_cost": this_month_cost,
+                "total_cost": container.total_cost if container else 0,
+            },
+        },
+    )
+
+
+@router.put("/{user_id}", response_model=ResponseData)
+async def update_user(
+    user_id: int,
+    user_update: UserUpdate,
+    current_admin=Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """更新用户信息"""
+    user = await user_service.get_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+
+    old_value = f"{{company_name: {user.company_name}, contact_name: {user.contact_name}, status: {user.status}}}"
+
+    user = await user_service.update(
+        db,
+        user,
+        {
+            "company_name": user_update.company_name,
+            "contact_name": user_update.contact_name,
+            "status": user_update.status,
+        },
+    )
+
+    new_value = f"{{company_name: {user.company_name}, contact_name: {user.contact_name}, status: {user.status}}}"
+
+    # 记录日志
+    await log_service.create_admin_operation_log(
+        db,
+        current_admin.id,
+        "update_user",
+        "user",
+        user_id,
+        old_value=old_value,
+        new_value=new_value,
+        description=f"更新用户信息",
+    )
+
+    return ResponseData(code=200, message="更新成功")
+
+
+@router.post("/{user_id}/reset-password", response_model=ResponseData)
+async def reset_user_password(
+    user_id: int,
+    reset_data: UserResetPassword,
+    current_admin=Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """重置用户密码"""
+    user = await user_service.get_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+
+    user.password_hash = get_password_hash(reset_data.new_password)
+    await db.commit()
+
+    # 记录日志
+    await log_service.create_admin_operation_log(
+        db,
+        current_admin.id,
+        "reset_password",
+        "user",
+        user_id,
+        description="重置用户密码",
+    )
+
+    return ResponseData(code=200, message="密码重置成功")
+
+
+@router.post("/{user_id}/balance", response_model=ResponseData)
+async def change_user_balance(
+    user_id: int,
+    balance_change: BalanceChange,
+    current_admin=Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """充值/扣减用户余额"""
+    user = await user_service.get_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+
+    if balance_change.type not in ["recharge", "deduct"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="无效的操作类型"
+        )
+
+    if balance_change.type == "deduct":
+        amount = -abs(balance_change.amount)
+        if user.balance < abs(amount):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="扣减金额不能超过用户余额",
+            )
+    else:
+        amount = abs(balance_change.amount)
+
+    balance_before = user.balance
+
+    # 更新余额
+    log = await user_service.update_balance(
+        db,
+        user,
+        amount,
+        change_type=balance_change.type,
+        description=balance_change.description
+        or ("管理员充值" if balance_change.type == "recharge" else "管理员扣减"),
+        operator_id=current_admin.id,
+        operator_type="admin",
+    )
+
+    # 记录日志
+    await log_service.create_admin_operation_log(
+        db,
+        current_admin.id,
+        f"{balance_change.type}_balance",
+        "user",
+        user_id,
+        old_value=f"{{balance: {balance_before}}}",
+        new_value=f"{{balance: {user.balance}}}",
+        description=f"{'充值' if balance_change.type == 'recharge' else '扣减'} {abs(amount)} 元",
+    )
+
+    return ResponseData(
+        code=200,
+        message="操作成功",
+        data={
+            "user_id": user_id,
+            "balance_before": balance_before,
+            "balance_after": user.balance,
+            "change_amount": amount,
+            "operation_id": log.id,
+        },
+    )
+
+
+# 导入BillingChargeRecord
+from app.models.models import BillingChargeRecord
