@@ -22,26 +22,30 @@ class UCloudService:
     async def create_container(
         self,
         instance_name: str,
-        gpu_type: str = "3090",
-        cpu_cores: int = 12,
-        memory_gb: int = 32,
-        storage_gb: int = 200,
     ) -> dict:
-        """创建容器实例"""
+        """创建容器实例
+
+        默认参数固定，仅实例名称可自定义。
+        参考 Ucloud_SDK_example.py 中的创建方式。
+        """
         try:
-            # 创建容器实例
+            # 创建容器实例 - 使用固定默认参数
             create_resp = self.client.ucompshare().create_comp_share_instance(
                 {
-                    "Zone": settings.UCLOUD_ZONE,
-                    "MachineType": "G",
-                    "CompShareImageId": settings.UCLOUD_IMAGE_ID,
-                    "GPU": 1,
-                    "GpuType": gpu_type,
-                    "CPU": cpu_cores,
-                    "Memory": memory_gb * 1024,  # 转换为MB
+                    "Zone": "cn-wlcb-01",  # 总是cn-wlcb-01
+                    "MachineType": "G",  # 总是G
+                    "CompShareImageId": "compshareImage-1mnqn08rd1xz",  # 使用的镜像ID
+                    "GPU": 1,  # GPU数量
+                    "GpuType": "3080Ti",  # GPU类型
+                    "CPU": 12,  # CPU核心数
+                    "Memory": 32768,  # 内存大小
                     "ChargeType": "Postpay",
                     "Disks": [
-                        {"IsBoot": True, "Size": storage_gb, "Type": "CLOUD_SSD"}
+                        {
+                            "IsBoot": True,
+                            "Size": 200,  # 系统盘大小，200表示200G
+                            "Type": "CLOUD_SSD",
+                        }
                     ],
                     "Name": instance_name,
                 }

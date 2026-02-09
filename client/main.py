@@ -204,15 +204,15 @@ class CreateContainerDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("创建云电脑")
-        self.setFixedSize(450, 450)
+        self.setFixedSize(400, 300)
         self.setup_ui()
 
     def setup_ui(self):
         layout = QVBoxLayout()
         layout.setContentsMargins(30, 20, 30, 20)
 
-        # 配置选择
-        config_group = QGroupBox("配置选择")
+        # 配置信息（固定参数，仅展示）
+        config_group = QGroupBox("配置信息")
         config_group.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
@@ -231,44 +231,37 @@ class CreateContainerDialog(QDialog):
         config_layout = QGridLayout()
         config_layout.setSpacing(15)
 
-        # GPU类型
-        config_layout.addWidget(QLabel("GPU类型:"), 0, 0)
-        self.gpu_combo = QComboBox()
-        self.gpu_combo.addItems(["V100", "A100", "3090", "4090", "3080Ti"])
-        self.gpu_combo.setStyleSheet("padding: 5px;")
-        config_layout.addWidget(self.gpu_combo, 0, 1)
+        # 显示固定配置
+        config_layout.addWidget(QLabel("GPU:"), 0, 0)
+        gpu_label = QLabel("NVIDIA 3080Ti x 1")
+        gpu_label.setStyleSheet("color: #606266;")
+        config_layout.addWidget(gpu_label, 0, 1)
 
-        # CPU核数
-        config_layout.addWidget(QLabel("CPU核数:"), 1, 0)
-        self.cpu_spin = QSpinBox()
-        self.cpu_spin.setRange(4, 64)
-        self.cpu_spin.setValue(8)
-        config_layout.addWidget(self.cpu_spin, 1, 1)
+        config_layout.addWidget(QLabel("CPU:"), 1, 0)
+        cpu_label = QLabel("12 核")
+        cpu_label.setStyleSheet("color: #606266;")
+        config_layout.addWidget(cpu_label, 1, 1)
 
-        # 内存
-        config_layout.addWidget(QLabel("内存(GB):"), 2, 0)
-        self.memory_spin = QSpinBox()
-        self.memory_spin.setRange(8, 256)
-        self.memory_spin.setValue(32)
-        self.memory_spin.setSingleStep(8)
-        config_layout.addWidget(self.memory_spin, 2, 1)
+        config_layout.addWidget(QLabel("内存:"), 2, 0)
+        memory_label = QLabel("32 GB")
+        memory_label.setStyleSheet("color: #606266;")
+        config_layout.addWidget(memory_label, 2, 1)
 
-        # 存储
-        config_layout.addWidget(QLabel("存储(GB):"), 3, 0)
-        self.storage_spin = QSpinBox()
-        self.storage_spin.setRange(100, 1000)
-        self.storage_spin.setValue(200)
-        self.storage_spin.setSingleStep(50)
-        config_layout.addWidget(self.storage_spin, 3, 1)
-
-        # 实例名称
-        config_layout.addWidget(QLabel("实例名称:"), 4, 0)
-        self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("请输入实例名称")
-        config_layout.addWidget(self.name_input, 4, 1)
+        config_layout.addWidget(QLabel("存储:"), 3, 0)
+        storage_label = QLabel("200 GB SSD")
+        storage_label.setStyleSheet("color: #606266;")
+        config_layout.addWidget(storage_label, 3, 1)
 
         config_group.setLayout(config_layout)
         layout.addWidget(config_group)
+
+        # 实例名称
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(QLabel("实例名称:"))
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("请输入实例名称")
+        name_layout.addWidget(self.name_input)
+        layout.addLayout(name_layout)
 
         # 按钮
         btn_layout = QHBoxLayout()
@@ -735,13 +728,7 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.Accepted:
             name = dialog.name_input.text().strip() or "我的云电脑"
 
-            resp = api_client.create_container(
-                gpu_type=dialog.gpu_combo.currentText(),
-                cpu_cores=dialog.cpu_spin.value(),
-                memory_gb=dialog.memory_spin.value(),
-                storage_gb=dialog.storage_spin.value(),
-                instance_name=name,
-            )
+            resp = api_client.create_container(instance_name=name)
 
             if resp.get("code") == 200:
                 QMessageBox.information(self, "成功", "云电脑创建成功！")

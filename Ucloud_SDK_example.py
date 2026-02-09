@@ -19,7 +19,7 @@ def create_container(uid):
             "MachineType": "G",  # 总是G
             "CompShareImageId": "compshareImage-1mnqn08rd1xz",  # 使用的镜像ID
             "GPU": 1,  # GPU数量
-            "GpuType": "3080Ti",  # GPU类型，可以是4090、3080Ti或3090
+            "GpuType": "3080Ti",  # GPU类型，可以是4090、3080Ti或3090                                                                                     
             "CPU": 12,  # CPU核心数
             "Memory": 32768,  # 内存大小，64*1024表示64G
             "ChargeType": "Postpay",
@@ -30,7 +30,7 @@ def create_container(uid):
                     "Type": "CLOUD_SSD"
                 }
             ],
-            "Name": "ceshishili1"
+            "Name": "测试实例"
         })
         
         # 获取新创建的实例ID
@@ -164,10 +164,10 @@ if __name__ == "__main__":
     print("=== Ucloud 容器管理调用案例 ===")
     
     # 案例1: 创建容器实例
-    # print("\n1. 创建容器实例:")
-    # user_id = "user123"
-    # instance_id = create_container(user_id)
-    # print(f"实例id: {instance_id}")
+    print("\n1. 创建容器实例:")
+    user_id = "user123"
+    instance_id = create_container(user_id)
+    print(f"实例id: {instance_id}")
     
     # 案例2: 启动已有实例
     print("\n2. 启动已有实例:")

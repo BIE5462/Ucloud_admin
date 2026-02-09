@@ -220,22 +220,17 @@ class APIClient:
 
     def create_container(
         self,
-        gpu_type: str,
-        cpu_cores: int,
-        memory_gb: int,
-        storage_gb: int,
         instance_name: str,
     ) -> Dict[str, Any]:
-        """创建云电脑"""
+        """创建云电脑
+
+        使用固定默认参数，仅实例名称可自定义。
+        """
         try:
             return self._request(
                 "POST",
                 "/container",
                 json={
-                    "gpu_type": gpu_type,
-                    "cpu_cores": cpu_cores,
-                    "memory_gb": memory_gb,
-                    "storage_gb": storage_gb,
                     "instance_name": instance_name,
                 },
             )

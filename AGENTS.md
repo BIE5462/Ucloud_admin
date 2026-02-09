@@ -22,10 +22,12 @@ D:\traework\admin/
 │   │   └── services/   # 业务逻辑
 │   └── requirements.txt
 ├── client/             # PySide6客户端
-└── test_api.py         # API测试
+├── test_api.py         # API测试
+├── test_container_api.py  # 容器API测试
+└── test_client.py      # 客户端测试
 ```
 
-## 构建命令
+## 构建与运行命令
 
 ### 前端 (admin-frontend)
 ```bash
@@ -43,9 +45,31 @@ pip install -r requirements.txt   # 安装依赖
 python run.py                     # 启动服务 (http://localhost:8000)
 ```
 
-### API测试
+### 代码检查
 ```bash
-python test_api.py    # 运行API测试
+# Python代码检查 (Ruff)
+cd backend
+ruff check .                      # 检查所有文件
+ruff check app/models/user.py     # 检查单个文件
+ruff check --fix .                # 自动修复问题
+
+# Python代码格式化
+ruff format .                     # 格式化所有文件
+ruff format app/services/         # 格式化目录
+```
+
+### 测试命令
+```bash
+# 运行所有测试
+python test_api.py
+python test_container_api.py
+python test_client.py
+
+# 使用pytest运行单个测试（推荐）
+pytest test_api.py -v                              # 详细输出
+pytest test_api.py::test_create_container -v       # 运行单个测试函数
+pytest test_container_api.py::TestContainer::test_list -v  # 运行单个测试类方法
+pytest test_api.py -k "container"                  # 按名称过滤测试
 ```
 
 ## 代码风格指南
@@ -58,6 +82,11 @@ python test_api.py    # 运行API测试
 - **状态管理**: Pinia (组合式API)
 - **UI库**: Element Plus
 - **路径别名**: `@/` 指向 `src/`
+
+**导入排序:**
+1. Vue核心库
+2. 第三方库 (Element Plus, axios等)
+3. 本地模块 (@/api, @/stores等)
 
 **示例:**
 ```vue
@@ -85,10 +114,15 @@ onMounted(fetchData)
 ### Python
 - **缩进**: 4空格
 - **引号**: 双引号
-- **代码检查**: Ruff (已配置缓存)
+- **代码检查**: Ruff
 - **类型提示**: 使用 `typing` 模块
 - **异步**: 使用 `async/await` (FastAPI + SQLAlchemy 2.0)
 - **模型**: SQLAlchemy声明式基类
+
+**导入排序:**
+1. 标准库
+2. 第三方库
+3. 本地模块 (app.*)
 
 **示例:**
 ```python
@@ -102,7 +136,7 @@ class UserService:
     @staticmethod
     async def get_by_id(
         db: AsyncSession, user_id: int
-    ) -> Optional[User]:
+    ) -> Optional["User"]:
         """根据ID获取用户"""
         result = await db.execute(
             select(User).where(User.id == user_id)
@@ -120,18 +154,6 @@ class UserService:
 | Python函数/变量 | snake_case | `get_by_id`, `user_data` |
 | Python常量 | UPPER_SNAKE_CASE | `DEFAULT_PRICE` |
 | API端点 | 小写+连字符 | `/admin/users` |
-
-### 导入排序
-
-**Vue/JavaScript:**
-1. Vue核心库
-2. 第三方库 (Element Plus, axios等)
-3. 本地模块 (@/api, @/stores等)
-
-**Python:**
-1. 标准库
-2. 第三方库
-3. 本地模块 (app.*)
 
 ### 错误处理
 
@@ -166,16 +188,14 @@ except Exception as e:
 ```
 
 ### UI规范
-
-- **主色调**: #409EFF (Element Plus默认蓝)
+- **主色调**: #409EFF
 - **成功色**: #67C23A
 - **警告色**: #E6A23C
 - **危险色**: #F56C6C
-- **侧边栏**: #304156 (深蓝灰)
+- **侧边栏**: #304156
 - **语言**: 中文界面，中文注释
 
 ### 组件模板规范
-
 ```vue
 <template>
   <div class="page-name">
@@ -203,18 +223,10 @@ except Exception as e:
 </style>
 ```
 
-## 测试说明
-
-当前使用简单的API测试脚本 `test_api.py`。如需添加单元测试，请使用 `pytest` 框架。
-
-运行单个测试:
-```bash
-pytest tests/test_user.py::test_create_user -v
-```
-
 ## 提交前检查清单
 
-- [ ] 代码通过Ruff检查 (Python)
+- [ ] 代码通过Ruff检查 (`ruff check .`)
+- [ ] Python代码已格式化 (`ruff format .`)
 - [ ] 没有console.log调试代码 (Vue)
 - [ ] 错误处理完善
 - [ ] 中文注释清晰
