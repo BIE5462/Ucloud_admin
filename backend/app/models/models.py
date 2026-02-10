@@ -9,6 +9,7 @@ from sqlalchemy import (
     Boolean,
 )
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from app.db.database import Base
 
 
@@ -26,14 +27,24 @@ class User(Base):
     current_container_id = Column(
         Integer, ForeignKey("container_record.id"), nullable=True, comment="当前容器ID"
     )
+    admin_id = Column(
+        Integer, ForeignKey("m_admin.id"), nullable=False, comment="所属管理员ID"
+    )
+    created_by = Column(
+        Integer, ForeignKey("m_admin.id"), nullable=False, comment="创建者管理员ID"
+    )
     status = Column(Integer, default=1, comment="状态：0-禁用, 1-正常")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_login_at = Column(DateTime(timezone=True), nullable=True)
 
+    # 关系
+    admin = relationship("Admin", back_populates="users", foreign_keys=[admin_id])
+    creator = relationship("Admin", foreign_keys=[created_by])
+
 
 class Admin(Base):
-    """管理员表"""
+    """管理员表（代理模式）"""
 
     __tablename__ = "m_admin"
 
@@ -45,10 +56,19 @@ class Admin(Base):
     created_by = Column(
         Integer, ForeignKey("m_admin.id"), nullable=True, comment="创建者ID"
     )
+    # 代理相关字段
+    balance = Column(Float, default=0.0, comment="代理余额(元)")
+    max_users = Column(Integer, default=10, comment="可开通用户数量上限")
+    company_name = Column(String(100), nullable=True, comment="公司名")
+    contact_name = Column(String(50), nullable=True, comment="联系人")
+    phone = Column(String(20), nullable=True, comment="手机号")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     last_login_ip = Column(String(50), nullable=True)
+
+    # 关系
+    users = relationship("User", back_populates="admin", foreign_keys="User.admin_id")
 
 
 class ContainerRecord(Base):
@@ -116,34 +136,29 @@ class BillingChargeRecord(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
-class BalanceLog(Base):
-    """余额变动记录表"""
-
-    __tablename__ = "balance_log"
-
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("m_user.id"), nullable=False)
-    change_type = Column(String(20), nullable=False, comment="变动类型")
-    amount = Column(Float, nullable=False, comment="变动金额")
-    balance_before = Column(Float, nullable=False)
-    balance_after = Column(Float, nullable=False)
-    related_id = Column(Integer, nullable=True, comment="关联记录ID")
-    description = Column(Text, nullable=True)
-    operator_id = Column(Integer, ForeignKey("m_admin.id"), nullable=True)
-    operator_type = Column(String(20), default="user", comment="操作人类型")
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
 class ContainerLog(Base):
     """容器操作日志表"""
 
     __tablename__ = "container_log"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey("m_user.id"), nullable=False)
-    container_id = Column(Integer, ForeignKey("container_record.id"), nullable=False)
-    action = Column(String(50), nullable=False, comment="操作类型")
-    action_status = Column(String(20), nullable=False, comment="状态")
+    user_id = Column(Integer, ForeignKey("m_user.id"), nullable=False, comment="用户ID")
+    container_id = Column(
+        Integer, ForeignKey("container_record.id"), nullable=False, comment="容器ID"
+    )
+    admin_id = Column(
+        Integer, ForeignKey("m_admin.id"), nullable=False, comment="归属管理员ID"
+    )
+    action = Column(
+        String(50),
+        nullable=False,
+        comment="操作类型: create/start/stop/delete/auto_stop",
+    )
+    action_status = Column(String(20), nullable=False, comment="状态: success/failed")
+    started_at = Column(DateTime(timezone=True), nullable=True, comment="本次启动时间")
+    stopped_at = Column(DateTime(timezone=True), nullable=True, comment="本次停止时间")
+    duration_minutes = Column(Integer, nullable=True, comment="使用时长(分钟)")
+    cost = Column(Float, nullable=True, comment="本次消耗费用(元)")
     request_data = Column(Text, nullable=True)
     response_data = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)

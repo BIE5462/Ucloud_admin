@@ -6,9 +6,9 @@ from typing import Optional
 
 from app.db.database import get_db
 from app.api.auth import get_current_user, get_current_admin
-from app.schemas.schemas import ResponseData, BalanceLogInfo, BillingChargeInfo
+from app.schemas.schemas import ResponseData, BillingChargeInfo
 from app.services.crud_service import container_service
-from app.models.models import BillingChargeRecord, BalanceLog
+from app.models.models import BillingChargeRecord
 
 router = APIRouter(prefix="/billing", tags=["账单管理"])
 
@@ -80,56 +80,6 @@ async def get_charge_records(
             ],
             "summary": {"total_amount": total_amount, "total_minutes": total_minutes},
         },
-    )
-
-
-@router.get("/balance-logs", response_model=ResponseData)
-async def get_balance_logs(
-    page: int = 1,
-    page_size: int = 20,
-    current_user=Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """获取余额变动记录"""
-    query = select(BalanceLog).where(BalanceLog.user_id == current_user.id)
-
-    # 获取总数
-    count_query = select(func.count()).select_from(query.subquery())
-    total = await db.scalar(count_query)
-
-    # 获取分页数据
-    query = query.order_by(BalanceLog.created_at.desc())
-    query = query.offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
-    logs = result.scalars().all()
-
-    # 获取操作人信息
-    items = []
-    for log in logs:
-        operator_name = None
-        if log.operator_id:
-            from app.services.crud_service import admin_service
-
-            admin = await admin_service.get_by_id(db, log.operator_id)
-            operator_name = admin.username if admin else None
-
-        items.append(
-            {
-                "id": log.id,
-                "change_type": log.change_type,
-                "amount": log.amount,
-                "balance_before": log.balance_before,
-                "balance_after": log.balance_after,
-                "description": log.description,
-                "operator_name": operator_name,
-                "created_at": log.created_at.isoformat() if log.created_at else None,
-            }
-        )
-
-    return ResponseData(
-        code=200,
-        message="success",
-        data={"total": total, "page": page, "page_size": page_size, "items": items},
     )
 
 

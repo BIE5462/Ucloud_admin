@@ -68,11 +68,26 @@ class AdminCreate(BaseModel):
     username: str
     password: str
     role: str = "admin"  # admin / super_admin
+    company_name: Optional[str] = None
+    contact_name: Optional[str] = None
+    phone: Optional[str] = None
+    initial_balance: Optional[float] = 0.0
+    max_users: Optional[int] = 10
 
 
 class AdminUpdate(BaseModel):
     status: Optional[int] = None
     role: Optional[str] = None
+    max_users: Optional[int] = None
+    company_name: Optional[str] = None
+    contact_name: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class AdminRecharge(BaseModel):
+    type: str  # recharge / deduct
+    amount: float
+    description: Optional[str] = None
 
 
 class AdminInfo(BaseModel):
@@ -150,27 +165,6 @@ class SystemConfigInfo(BaseModel):
     auto_stop_threshold: float = 0.0
 
 
-# ==================== 余额相关 ====================
-class BalanceChange(BaseModel):
-    type: str  # recharge / deduct
-    amount: float
-    description: Optional[str] = None
-
-
-class BalanceLogInfo(BaseModel):
-    id: int
-    change_type: str
-    amount: float
-    balance_before: float
-    balance_after: float
-    description: Optional[str] = None
-    operator_name: Optional[str] = None
-    created_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-
-
 # ==================== 扣费记录相关 ====================
 class BillingChargeInfo(BaseModel):
     id: int
@@ -189,8 +183,13 @@ class BillingChargeInfo(BaseModel):
 class ContainerLogInfo(BaseModel):
     id: int
     user_name: str
+    admin_name: str
     action: str
     action_status: str
+    started_at: Optional[datetime] = None
+    stopped_at: Optional[datetime] = None
+    duration_minutes: Optional[int] = None
+    cost: Optional[float] = None
     ip_address: Optional[str] = None
     error_message: Optional[str] = None
     created_at: Optional[datetime] = None

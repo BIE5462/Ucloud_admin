@@ -18,6 +18,7 @@ from app.api import (
     admin_manager,
     admin_config,
     admin_dashboard,
+    admin_log,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,7 @@ app.include_router(admin_user.router, prefix="/api")
 app.include_router(admin_manager.router, prefix="/api")
 app.include_router(admin_config.router, prefix="/api")
 app.include_router(admin_dashboard.router, prefix="/api")
+app.include_router(admin_log.router, prefix="/api")
 
 
 @app.get("/")

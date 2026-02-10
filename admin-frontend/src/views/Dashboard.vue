@@ -70,11 +70,11 @@ const dashboardData = ref({
 })
 
 const overviewCards = computed(() => [
-  { title: '用户总数', value: dashboardData.value.overview.total_users || 0, color: '#409EFF' },
-  { title: '容器总数', value: dashboardData.value.overview.total_containers || 0, color: '#67C23A' },
+  { title: '我的用户', value: dashboardData.value.overview.total_users || 0, color: '#409EFF' },
+  { title: '我的容器', value: dashboardData.value.overview.total_containers || 0, color: '#67C23A' },
   { title: '运行中', value: dashboardData.value.overview.running_containers || 0, color: '#E6A23C' },
   { title: '已停止', value: dashboardData.value.overview.stopped_containers || 0, color: '#909399' },
-  { title: '总余额', value: `¥${(dashboardData.value.overview.total_balance || 0).toFixed(2)}`, color: '#F56C6C' },
+  { title: '我的余额', value: `¥${(dashboardData.value.overview.total_balance || 0).toFixed(2)}`, color: '#F56C6C' },
   { title: '今日收入', value: `¥${(dashboardData.value.overview.today_income || 0).toFixed(2)}`, color: '#409EFF' }
 ])
 

@@ -190,11 +190,18 @@ export const deleteAdmin = (id) =>
 export const resetAdminPassword = (id, data) => 
   api.post(`/admin/admins/${id}/reset-password`, data)
 
+export const rechargeAdminBalance = (id, data) => 
+  api.post(`/admin/admins/${id}/balance`, data)
+
 // 系统配置
 export const getConfig = () => 
   api.get('/admin/config')
 
 export const updatePrice = (data) => 
   api.put('/admin/config/price', data)
+
+// 日志管理
+export const getContainerLogs = (params) =>
+  api.get('/admin/logs/container', { params })
 
 export default api

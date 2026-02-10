@@ -1,14 +1,14 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, or_
 from typing import Optional, List
+
+from app.db.database import AsyncSessionLocal
 from app.models.models import (
     User,
     Admin,
     ContainerRecord,
     SystemConfig,
-    BillingChargeRecord,
-    BalanceLog,
     ContainerLog,
     AdminOperationLog,
 )
@@ -42,6 +42,8 @@ class UserService:
             phone=user_data["phone"],
             password_hash=get_password_hash(user_data["password"]),
             balance=user_data.get("initial_balance", 0.0),
+            admin_id=user_data.get("admin_id"),
+            created_by=user_data.get("created_by"),
             status=1,
         )
         db.add(user)
@@ -68,30 +70,11 @@ class UserService:
         description: str = None,
         operator_id: int = None,
         operator_type: str = "system",
-    ) -> BalanceLog:
-        """更新用户余额并记录"""
-        old_balance = user.balance
-        new_balance = old_balance + amount
-
-        # 更新用户余额
+    ):
+        """更新用户余额"""
+        new_balance = user.balance + amount
         user.balance = new_balance
-
-        # 创建余额变动记录
-        balance_log = BalanceLog(
-            user_id=user.id,
-            change_type=change_type,
-            amount=amount,
-            balance_before=old_balance,
-            balance_after=new_balance,
-            description=description,
-            operator_id=operator_id,
-            operator_type=operator_type,
-        )
-        db.add(balance_log)
         await db.commit()
-        await db.refresh(balance_log)
-
-        return balance_log
 
     @staticmethod
     async def list_users(
@@ -129,6 +112,49 @@ class UserService:
         await db.delete(user)
         await db.commit()
 
+    @staticmethod
+    async def list_users_with_filters(
+        db: AsyncSession,
+        skip: int = 0,
+        limit: int = 20,
+        keyword: str = None,
+        filters: dict = None,
+    ) -> tuple:
+        """获取用户列表（带过滤条件）"""
+        from sqlalchemy.orm import joinedload
+
+        query = select(User).options(joinedload(User.admin))
+
+        if keyword:
+            query = query.where(
+                or_(User.company_name.contains(keyword), User.phone.contains(keyword))
+            )
+
+        # 应用额外过滤条件
+        if filters:
+            if "created_by" in filters:
+                query = query.where(User.created_by == filters["created_by"])
+            if "status" in filters:
+                query = query.where(User.status == filters["status"])
+
+        # 获取总数
+        count_query = select(func.count()).select_from(query.subquery())
+        total = await db.scalar(count_query)
+
+        # 获取分页数据
+        query = query.offset(skip).limit(limit).order_by(User.created_at.desc())
+        result = await db.execute(query)
+        users = result.scalars().all()
+
+        return total, users
+
+    @staticmethod
+    async def get_count_by_creator(db: AsyncSession, admin_id: int) -> int:
+        """获取某管理员创建的用户数量"""
+        query = select(func.count()).where(User.created_by == admin_id)
+        result = await db.execute(query)
+        return result.scalar() or 0
+
 
 class AdminService:
     """管理员服务"""
@@ -156,6 +182,11 @@ class AdminService:
             role=admin_data.get("role", "admin"),
             status=1,
             created_by=created_by,
+            company_name=admin_data.get("company_name"),
+            contact_name=admin_data.get("contact_name"),
+            phone=admin_data.get("phone"),
+            balance=admin_data.get("balance", 0.0),
+            max_users=admin_data.get("max_users", 10),
         )
         db.add(admin)
         await db.commit()
@@ -398,9 +429,14 @@ class LogService:
     async def create_container_log(
         db: AsyncSession,
         user_id: int,
+        admin_id: int,
         container_id: int,
         action: str,
         action_status: str = "success",
+        started_at: datetime = None,
+        stopped_at: datetime = None,
+        duration_minutes: int = None,
+        cost: float = None,
         request_data: str = None,
         response_data: str = None,
         error_message: str = None,
@@ -409,9 +445,14 @@ class LogService:
         """创建容器操作日志"""
         log = ContainerLog(
             user_id=user_id,
+            admin_id=admin_id,
             container_id=container_id,
             action=action,
             action_status=action_status,
+            started_at=started_at,
+            stopped_at=stopped_at,
+            duration_minutes=duration_minutes,
+            cost=cost,
             request_data=request_data,
             response_data=response_data,
             error_message=error_message,

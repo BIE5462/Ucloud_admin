@@ -46,7 +46,7 @@ python main.py
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
-| `API_BASE_URL` | API基础地址 | `http://localhost:8000/api` |
+| `API_BASE_URL` | API基础地址 | `http://159.75.50.37/api` |
 | `API_TIMEOUT` | 请求超时(秒) | `30` |
 | `LOG_LEVEL` | 日志级别 | `INFO` |
 | `RDP_AUTO_CONNECT` | 是否自动点击连接 | `true` |
@@ -61,7 +61,7 @@ python main.py
 ```json
 {
   "api": {
-    "base_url": "http://localhost:8000/api",
+    "base_url": "http://159.75.50.37/api",
     "timeout": 30,
     "max_retries": 3
   },

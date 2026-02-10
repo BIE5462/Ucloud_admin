@@ -25,15 +25,62 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# 安装 Node.js (如果未安装)
+# 安装 Node.js 20+ (如果未安装)
 install_nodejs() {
-    echo -e "${YELLOW}[1/6] 检查 Node.js...${NC}"
+    echo -e "${YELLOW}[1/6] 检查 Node.js 20+...${NC}"
     
     if command_exists node && command_exists npm; then
         NODE_VERSION=$(node --version)
         NPM_VERSION=$(npm --version)
-        echo -e "${GREEN}✓ Node.js 已安装: $NODE_VERSION${NC}"
-        echo -e "${GREEN}✓ npm 已安装: $NPM_VERSION${NC}"
+        
+        # 提取版本号数字部分
+        VERSION=$(echo "$NODE_VERSION" | sed 's/v//')
+        MAJOR=$(echo "$VERSION" | cut -d '.' -f 1)
+        
+        if [ "$MAJOR" -ge 20 ]; then
+            echo -e "${GREEN}✓ Node.js 20+ 已安装: $NODE_VERSION${NC}"
+            echo -e "${GREEN}✓ npm 已安装: $NPM_VERSION${NC}"
+        else
+            echo -e "${YELLOW}Node.js 版本过低: $NODE_VERSION，需要 20+，正在安装...${NC}"
+            
+            # 检测Linux发行版
+            if [ -f /etc/os-release ]; then
+                . /etc/os-release
+                OS=$NAME
+            else
+                echo -e "${RED}无法检测操作系统${NC}"
+                exit 1
+            fi
+            
+            # 根据发行版安装 Node.js
+            case "$OS" in
+                "Ubuntu"*|"Debian"*) 
+                    # 先卸载旧版本
+                    sudo apt-get remove -y nodejs npm
+                    sudo apt-get autoremove -y
+                    # 安装新版本
+                    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+                    sudo apt-get install -y nodejs
+                    ;;
+                "CentOS"*|"Red Hat"*|"Fedora"*) 
+                    # 先卸载旧版本
+                    sudo yum remove -y nodejs npm
+                    # 安装新版本
+                    curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+                    sudo yum install -y nodejs
+                    ;;
+                "Arch Linux") 
+                    sudo pacman -S nodejs npm --noconfirm
+                    ;;
+                *)
+                    echo -e "${RED}不支持的操作系统: $OS${NC}"
+                    echo "请手动安装 Node.js 20+"
+                    exit 1
+                    ;;
+            esac
+            
+            echo -e "${GREEN}✓ Node.js 20+ 安装完成${NC}"
+        fi
     else
         echo -e "${YELLOW}Node.js 未安装，正在安装...${NC}"
         
@@ -48,15 +95,15 @@ install_nodejs() {
         
         # 根据发行版安装 Node.js
         case "$OS" in
-            "Ubuntu"*|"Debian"*)
+            "Ubuntu"*|"Debian"*) 
                 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
                 sudo apt-get install -y nodejs
                 ;;
-            "CentOS"*|"Red Hat"*|"Fedora"*)
+            "CentOS"*|"Red Hat"*|"Fedora"*) 
                 curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
                 sudo yum install -y nodejs
                 ;;
-            "Arch Linux")
+            "Arch Linux") 
                 sudo pacman -S nodejs npm --noconfirm
                 ;;
             *)

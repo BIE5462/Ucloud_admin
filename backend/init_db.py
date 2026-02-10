@@ -15,7 +15,6 @@ from app.models.models import (
     Admin,
     ContainerRecord,
     BillingChargeRecord,
-    BalanceLog,
     ContainerLog,
     SystemConfig,
     AdminOperationLog,
@@ -113,7 +112,6 @@ async def clear_existing_data():
             # 按照依赖关系顺序删除数据
             # 1. 删除日志表
             await db.execute(ContainerLog.__table__.delete())
-            await db.execute(BalanceLog.__table__.delete())
             await db.execute(AdminOperationLog.__table__.delete())
 
             # 2. 删除计费记录
@@ -145,11 +143,23 @@ async def create_default_data():
         # 创建默认超级管理员
         print("创建默认超级管理员...")
         await admin_service.create(
-            db, {"username": "admin", "password": "123456", "role": "super_admin"}
+            db,
+            {
+                "username": "admin",
+                "password": "123456",
+                "role": "super_admin",
+                "company_name": "系统管理",
+                "contact_name": "超级管理员",
+                "phone": "13800000000",
+                "balance": 999999.0,
+                "max_users": 999999,
+            },
         )
         print("超级管理员创建成功")
         print("  用户名: admin")
         print("  密码: 123456")
+        print("  初始余额: ¥999,999.00")
+        print("  用户上限: 无限制")
 
         # 初始化系统配置
         print("初始化系统配置...")

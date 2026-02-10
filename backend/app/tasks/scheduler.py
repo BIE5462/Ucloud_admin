@@ -5,13 +5,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.db.database import AsyncSessionLocal
-from app.services.crud_service import container_service, user_service, config_service
+from app.services.crud_service import (
+    container_service,
+    user_service,
+    config_service,
+    admin_service,
+)
 from app.services.ucloud_service import ucloud_service
 from app.models.models import (
     ContainerRecord,
     User,
+    Admin,
     BillingChargeRecord,
-    BalanceLog,
     ContainerLog,
 )
 
@@ -19,7 +24,10 @@ scheduler = AsyncIOScheduler()
 
 
 async def charge_running_containers():
-    """每分钟扣费任务"""
+    """每分钟扣费任务
+
+    扣费逻辑：从用户所属的管理员余额中扣除费用
+    """
     async with AsyncSessionLocal() as db:
         try:
             # 获取所有运行中的容器
@@ -31,8 +39,13 @@ async def charge_running_containers():
                 if not user:
                     continue
 
-                # 检查余额是否足够
-                if user.balance < container.price_per_minute:
+                # 获取用户所属的管理员
+                admin = await admin_service.get_by_id(db, user.admin_id)
+                if not admin:
+                    continue
+
+                # 检查管理员余额是否足够
+                if admin.balance < container.price_per_minute:
                     # 余额不足，停止实例
                     result = await ucloud_service.stop_container(
                         container.ucloud_instance_id
@@ -51,20 +64,26 @@ async def charge_running_containers():
                         # 记录日志
                         log = ContainerLog(
                             user_id=user.id,
+                            admin_id=user.admin_id,
                             container_id=container.id,
                             action="auto_stop",
                             action_status="success",
-                            error_message="余额不足自动停止",
+                            error_message="代理余额不足自动停止",
                         )
                         db.add(log)
                         await db.commit()
 
                     continue
 
-                # 扣费
-                old_balance = user.balance
-                new_balance = old_balance - container.price_per_minute
-                user.balance = new_balance
+                # 从管理员余额扣费
+                old_admin_balance = admin.balance
+                new_admin_balance = old_admin_balance - container.price_per_minute
+                admin.balance = new_admin_balance
+
+                # 同步扣除用户余额（用于显示）
+                old_user_balance = user.balance
+                new_user_balance = old_user_balance - container.price_per_minute
+                user.balance = new_user_balance
 
                 # 创建扣费记录
                 charge_record = BillingChargeRecord(
@@ -73,22 +92,10 @@ async def charge_running_containers():
                     charge_minute=datetime.utcnow().replace(second=0, microsecond=0),
                     price_per_minute=container.price_per_minute,
                     amount=container.price_per_minute,
-                    balance_before=old_balance,
-                    balance_after=new_balance,
+                    balance_before=old_user_balance,
+                    balance_after=new_user_balance,
                 )
                 db.add(charge_record)
-
-                # 创建余额变动记录
-                balance_log = BalanceLog(
-                    user_id=user.id,
-                    change_type="deduct",
-                    amount=-container.price_per_minute,
-                    balance_before=old_balance,
-                    balance_after=new_balance,
-                    description="云电脑使用扣费",
-                    operator_type="system",
-                )
-                db.add(balance_log)
 
                 # 更新容器累计数据
                 container.total_running_minutes += 1

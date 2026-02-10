@@ -207,10 +207,11 @@ async def create_container(
     # 记录日志
     await log_service.create_container_log(
         db,
-        current_user.id,
-        container.id,
-        "create",
-        "success",
+        user_id=current_user.id,
+        admin_id=current_user.admin_id,
+        container_id=container.id,
+        action="create",
+        action_status="success",
         ip_address=request.client.host,
     )
 
@@ -272,10 +273,12 @@ async def start_container(
     # 记录日志
     await log_service.create_container_log(
         db,
-        current_user.id,
-        container.id,
-        "start",
-        "success",
+        user_id=current_user.id,
+        admin_id=current_user.admin_id,
+        container_id=container.id,
+        action="start",
+        action_status="success",
+        started_at=container.started_at,
         ip_address=request.client.host,
     )
 
@@ -340,10 +343,15 @@ async def stop_container(
     # 记录日志
     await log_service.create_container_log(
         db,
-        current_user.id,
-        container.id,
-        "stop",
-        "success",
+        user_id=current_user.id,
+        admin_id=current_user.admin_id,
+        container_id=container.id,
+        action="stop",
+        action_status="success",
+        started_at=container.started_at,
+        stopped_at=container.stopped_at,
+        duration_minutes=stats["running_minutes"],
+        cost=stats["cost"],
         ip_address=request.client.host,
     )
 
@@ -417,10 +425,11 @@ async def delete_container(
     # 记录日志
     await log_service.create_container_log(
         db,
-        current_user.id,
-        container.id,
-        "delete",
-        "success",
+        user_id=current_user.id,
+        admin_id=current_user.admin_id,
+        container_id=container.id,
+        action="delete",
+        action_status="success",
         request_data=f"{{reason: {delete_request.reason}}}",
         ip_address=request.client.host,
     )

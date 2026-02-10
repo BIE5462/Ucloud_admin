@@ -12,7 +12,7 @@ class AppConfig:
     """应用配置"""
 
     # API配置
-    api_base_url: str = "http://localhost:8000/api"
+    api_base_url: str = "http://localhost:8000/api"#"http://159.75.50.37:8000/api"
     api_timeout: int = 30
     api_max_retries: int = 3
     api_retry_delay: float = 1.0

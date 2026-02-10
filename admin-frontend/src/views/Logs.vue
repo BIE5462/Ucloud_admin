@@ -2,62 +2,96 @@
   <div class="logs-page">
     <el-card>
       <template #header>
-        <span>日志中心</span>
+        <div class="header-actions">
+          <span>容器操作日志</span>
+          <div class="filter-actions">
+            <el-select 
+              v-model="filterUser" 
+              placeholder="选择用户" 
+              clearable 
+              filterable
+              style="width: 160px; margin-right: 10px;"
+            >
+              <el-option 
+                v-for="user in userList" 
+                :key="user.id" 
+                :label="user.company_name" 
+                :value="user.id" 
+              />
+            </el-select>
+            <el-select 
+              v-if="isSuperAdmin"
+              v-model="filterAdmin" 
+              placeholder="归属管理员" 
+              clearable 
+              filterable
+              style="width: 160px; margin-right: 10px;"
+            >
+              <el-option 
+                v-for="admin in adminList" 
+                :key="admin.id" 
+                :label="admin.username" 
+                :value="admin.id" 
+              />
+            </el-select>
+            <el-select v-model="filterAction" placeholder="操作类型" clearable style="width: 120px; margin-right: 10px;">
+              <el-option label="创建" value="create" />
+              <el-option label="启动" value="start" />
+              <el-option label="停止" value="stop" />
+              <el-option label="删除" value="delete" />
+              <el-option label="自动停止" value="auto_stop" />
+            </el-select>
+            <el-button type="primary" @click="handleQuery">查询</el-button>
+            <el-button @click="handleReset">重置</el-button>
+          </div>
+        </div>
       </template>
 
-      <el-tabs v-model="activeTab">
-        <el-tab-pane label="容器操作日志" name="container">
-          <el-table :data="logs" v-loading="loading" border>
-            <el-table-column prop="id" label="ID" width="80" />
-            <el-table-column prop="user_name" label="用户" />
-            <el-table-column prop="action" label="操作" width="120">
-              <template #default="{ row }">
-                <el-tag :type="getActionType(row.action)">{{ row.action }}</el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="action_status" label="状态" width="100">
-              <template #default="{ row }">
-                <el-tag :type="row.action_status === 'success' ? 'success' : 'danger'">
-                  {{ row.action_status === 'success' ? '成功' : '失败' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="ip_address" label="IP地址" />
-            <el-table-column prop="error_message" label="错误信息" show-overflow-tooltip />
-            <el-table-column prop="created_at" label="时间" width="180" />
-          </el-table>
-        </el-tab-pane>
-
-        <el-tab-pane label="余额变动日志" name="balance">
-          <el-table :data="balanceLogs" v-loading="loading" border>
-            <el-table-column prop="id" label="ID" width="80" />
-            <el-table-column prop="user_name" label="用户" />
-            <el-table-column prop="change_type" label="类型" width="100">
-              <template #default="{ row }">
-                <el-tag :type="row.change_type === 'recharge' ? 'success' : 'danger'">
-                  {{ row.change_type === 'recharge' ? '充值' : '扣费' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column prop="amount" label="金额" width="120">
-              <template #default="{ row }">
-                <span :class="row.amount > 0 ? 'text-success' : 'text-danger'">
-                  {{ row.amount > 0 ? '+' : '' }}{{ row.amount.toFixed(2) }}
-                </span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="balance_before" label="变动前" width="120">
-              <template #default="{ row }">{{ row.balance_before.toFixed(2) }}</template>
-            </el-table-column>
-            <el-table-column prop="balance_after" label="变动后" width="120">
-              <template #default="{ row }">{{ row.balance_after.toFixed(2) }}</template>
-            </el-table-column>
-            <el-table-column prop="operator_name" label="操作人" width="120" />
-            <el-table-column prop="description" label="备注" show-overflow-tooltip />
-            <el-table-column prop="created_at" label="时间" width="180" />
-          </el-table>
-        </el-tab-pane>
-      </el-tabs>
+      <el-table :data="logs" v-loading="loading" border>
+        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column prop="user_name" label="用户" min-width="120" />
+        <el-table-column prop="admin_name" label="归属管理员" min-width="120" />
+        <el-table-column prop="action" label="操作" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getActionType(row.action)">{{ getActionText(row.action) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="action_status" label="状态" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.action_status === 'success' ? 'success' : 'danger'" size="small">
+              {{ row.action_status === 'success' ? '成功' : '失败' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="started_at" label="启动时间" width="170">
+          <template #default="{ row }">
+            {{ row.started_at ? formatDateTime(row.started_at) : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="stopped_at" label="停止时间" width="170">
+          <template #default="{ row }">
+            {{ row.stopped_at ? formatDateTime(row.stopped_at) : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="duration_minutes" label="使用时长" width="100">
+          <template #default="{ row }">
+            <span v-if="row.duration_minutes">{{ row.duration_minutes }} 分钟</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="cost" label="费用(元)" width="100">
+          <template #default="{ row }">
+            <span v-if="row.cost" class="cost-value">¥{{ row.cost.toFixed(2) }}</span>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="ip_address" label="IP地址" width="130" />
+        <el-table-column prop="created_at" label="记录时间" width="170">
+          <template #default="{ row }">
+            {{ formatDateTime(row.created_at) }}
+          </template>
+        </el-table-column>
+      </el-table>
 
       <el-pagination
         v-model:current-page="pagination.page"
@@ -72,13 +106,22 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage } from 'element-plus'
+import { getContainerLogs, getUserList, getAdminList } from '@/api/index'
+import { useAdminStore } from '@/stores/admin'
 
-const activeTab = ref('container')
+const adminStore = useAdminStore()
 const loading = ref(false)
 const logs = ref([])
-const balanceLogs = ref([])
+const filterAction = ref('')
+const filterUser = ref('')
+const filterAdmin = ref('')
+const userList = ref([])
+const adminList = ref([])
+
+const isSuperAdmin = computed(() => adminStore.role === 'super_admin')
+
 const pagination = reactive({
   page: 1,
   page_size: 20,
@@ -90,34 +133,107 @@ const getActionType = (action) => {
     create: 'primary',
     start: 'success',
     stop: 'warning',
-    delete: 'danger'
+    delete: 'danger',
+    auto_stop: 'info'
   }
   return map[action] || 'info'
+}
+
+const getActionText = (action) => {
+  const map = {
+    create: '创建',
+    start: '启动',
+    stop: '停止',
+    delete: '删除',
+    auto_stop: '自动停止'
+  }
+  return map[action] || action
+}
+
+const formatDateTime = (datetime) => {
+  if (!datetime) return '-'
+  const date = new Date(datetime)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
 }
 
 const fetchLogs = async () => {
   loading.value = true
   try {
-    // 这里应该调用实际的API
-    // 模拟数据
-    if (activeTab.value === 'container') {
-      logs.value = [
-        { id: 1, user_name: 'ABC公司', action: 'start', action_status: 'success', ip_address: '192.168.1.1', created_at: '2026-02-09 10:00:00' },
-        { id: 2, user_name: 'XYZ公司', action: 'stop', action_status: 'success', ip_address: '192.168.1.2', created_at: '2026-02-09 09:30:00' }
-      ]
-    } else {
-      balanceLogs.value = [
-        { id: 1, user_name: 'ABC公司', change_type: 'recharge', amount: 100, balance_before: 0, balance_after: 100, operator_name: 'admin', description: '充值', created_at: '2026-02-09 10:00:00' }
-      ]
+    const params = {
+      page: pagination.page,
+      page_size: pagination.page_size
     }
-    pagination.total = 2
+    if (filterAction.value) {
+      params.action = filterAction.value
+    }
+    if (filterUser.value) {
+      params.user_id = filterUser.value
+    }
+    if (isSuperAdmin.value && filterAdmin.value) {
+      params.admin_id = filterAdmin.value
+    }
+
+    const res = await getContainerLogs(params)
+    if (res.code === 200) {
+      logs.value = res.data.items
+      pagination.total = res.data.total
+    }
+  } catch (error) {
+    ElMessage.error('获取日志失败')
   } finally {
     loading.value = false
   }
 }
 
-watch(activeTab, fetchLogs)
-fetchLogs()
+const fetchUserList = async () => {
+  try {
+    const params = isSuperAdmin.value ? { page: 1, page_size: 1000 } : {}
+    const res = await getUserList(params)
+    if (res.code === 200) {
+      userList.value = res.data.items || []
+    }
+  } catch (error) {
+    console.error('获取用户列表失败', error)
+  }
+}
+
+const fetchAdminList = async () => {
+  if (!isSuperAdmin.value) return
+  try {
+    const res = await getAdminList({ page: 1, page_size: 1000 })
+    if (res.code === 200) {
+      adminList.value = res.data.items || []
+    }
+  } catch (error) {
+    console.error('获取管理员列表失败', error)
+  }
+}
+
+const handleQuery = () => {
+  pagination.page = 1
+  fetchLogs()
+}
+
+const handleReset = () => {
+  filterAction.value = ''
+  filterUser.value = ''
+  filterAdmin.value = ''
+  pagination.page = 1
+  fetchLogs()
+}
+
+onMounted(() => {
+  fetchUserList()
+  fetchAdminList()
+  fetchLogs()
+})
 </script>
 
 <style scoped>
@@ -125,16 +241,24 @@ fetchLogs()
   padding: 20px;
 }
 
+.header-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.filter-actions {
+  display: flex;
+  align-items: center;
+}
+
 .pagination {
   margin-top: 20px;
   justify-content: flex-end;
 }
 
-.text-success {
-  color: #67C23A;
-}
-
-.text-danger {
+.cost-value {
   color: #F56C6C;
+  font-weight: bold;
 }
 </style>

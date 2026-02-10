@@ -11,7 +11,17 @@
       <!-- 搜索筛选 -->
       <el-form :inline="true" :model="searchForm" class="search-form">
         <el-form-item label="关键词">
-          <el-input v-model="searchForm.keyword" placeholder="公司名/手机号" clearable />
+          <el-input v-model="searchForm.keyword" placeholder="公司名/手机号-账号" clearable />
+        </el-form-item>
+        <el-form-item label="管理员" v-if="isSuperAdmin">
+          <el-select v-model="searchForm.admin_id" placeholder="全部管理员" clearable style="width: 160px">
+            <el-option
+              v-for="admin in adminOptions"
+              :key="admin.id"
+              :label="admin.username"
+              :value="admin.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="searchForm.status" placeholder="全部" clearable>
@@ -27,18 +37,18 @@
 
       <!-- 用户表格 -->
       <el-table :data="userList" v-loading="loading" border>
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="company_name" label="公司名称" />
-        <el-table-column prop="contact_name" label="联系人" />
-        <el-table-column prop="phone" label="手机号" />
-        <el-table-column prop="balance" label="余额" width="120">
+        <el-table-column prop="id" label="ID" width="70" />
+        <el-table-column prop="company_name" label="公司名称" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="contact_name" label="联系人" width="100" />
+        <el-table-column prop="phone" label="手机号-账号" width="120" />
+        <el-table-column prop="balance" label="余额" width="100">
           <template #default="{ row }">
             <span :class="{ 'text-danger': row.balance < 10 }">
-              ¥{{ row.balance.toFixed(2) }}
+              ¥{{ row.balance?.toFixed(2) }}
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="has_container" label="云电脑" width="100">
+        <el-table-column prop="has_container" label="云电脑" width="90">
           <template #default="{ row }">
             <el-tag v-if="row.has_container" :type="row.container_status === 'running' ? 'success' : 'info'">
               {{ row.container_status === 'running' ? '运行中' : '已停止' }}
@@ -46,14 +56,23 @@
             <el-tag v-else type="info">无</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="created_at" label="创建时间" width="140" />
+        <el-table-column prop="belongs_to_admin" label="归属代理" width="110" v-if="isSuperAdmin">
+          <template #default="{ row }">
+            <el-tag v-if="row.belongs_to_admin" type="info" size="small">
+              {{ row.belongs_to_admin }}
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="80">
           <template #default="{ row }">
             <el-tag :type="row.status === 1 ? 'success' : 'danger'">
               {{ row.status === 1 ? '正常' : '禁用' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" size="small" @click="handleEdit(row)">编辑</el-button>
             <el-button type="success" size="small" @click="handleRecharge(row)">充值</el-button>
@@ -83,7 +102,7 @@
         <el-form-item label="联系人" prop="contact_name">
           <el-input v-model="form.contact_name" />
         </el-form-item>
-        <el-form-item label="手机号" prop="phone">
+        <el-form-item label="手机号-账号" prop="phone">
           <el-input v-model="form.phone" :disabled="!!form.id" />
         </el-form-item>
         <el-form-item :label="form.id ? '新密码' : '密码'" prop="password" v-if="!form.id">
@@ -133,15 +152,21 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getUserList, createUser, updateUser, resetUserPassword, changeUserBalance, deleteUser } from '@/api'
+import { useAdminStore } from '@/stores/admin'
+import { getUserList, createUser, updateUser, resetUserPassword, changeUserBalance, deleteUser, getAdminList } from '@/api'
+
+const adminStore = useAdminStore()
+const isSuperAdmin = computed(() => adminStore.isSuperAdmin)
 
 const loading = ref(false)
 const userList = ref([])
+const adminOptions = ref([])
 const searchForm = reactive({
   keyword: '',
-  status: null
+  status: null,
+  admin_id: null
 })
 const pagination = reactive({
   page: 1,
@@ -167,7 +192,7 @@ const form = reactive({
 const rules = {
   company_name: [{ required: true, message: '请输入公司名称', trigger: 'blur' }],
   contact_name: [{ required: true, message: '请输入联系人', trigger: 'blur' }],
-  phone: [{ required: true, message: '请输入手机号', trigger: 'blur' }],
+  phone: [{ required: true, message: '请输入手机号-账号', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur', min: 6 }]
 }
 
@@ -184,12 +209,17 @@ const rechargeForm = reactive({
 const fetchData = async () => {
   loading.value = true
   try {
-    const res = await getUserList({
+    const params = {
       page: pagination.page,
       page_size: pagination.page_size,
       keyword: searchForm.keyword,
       status: searchForm.status
-    })
+    }
+    // 超级管理员可以按管理员筛选
+    if (isSuperAdmin.value && searchForm.admin_id) {
+      params.admin_id = searchForm.admin_id
+    }
+    const res = await getUserList(params)
     if (res.code === 200) {
       userList.value = res.data.items
       pagination.total = res.data.total
@@ -207,7 +237,22 @@ const handleSearch = () => {
 const resetSearch = () => {
   searchForm.keyword = ''
   searchForm.status = null
+  searchForm.admin_id = null
   handleSearch()
+}
+
+// 获取管理员列表（用于筛选）
+const fetchAdminOptions = async () => {
+  if (!isSuperAdmin.value) return
+  try {
+    const res = await getAdminList({ page: 1, page_size: 1000 })
+    if (res.code === 200) {
+      // 只显示普通管理员，不显示超级管理员
+      adminOptions.value = res.data.items.filter(admin => admin.role === 'admin')
+    }
+  } catch (error) {
+    console.error('获取管理员列表失败:', error)
+  }
 }
 
 const handleCreate = () => {
@@ -318,7 +363,10 @@ const handleDelete = async (row) => {
   }
 }
 
-onMounted(fetchData)
+onMounted(() => {
+  fetchData()
+  fetchAdminOptions()
+})
 </script>
 
 <style scoped>
