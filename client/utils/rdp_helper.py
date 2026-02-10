@@ -48,16 +48,18 @@ class RDPHelper:
 
         Args:
             hostname: 主机名
-            username: 用户名
+            username: administrator
             password: 密码
 
         Returns:
             bool: 是否保存成功
+
+            username固定为administrator
         """
         try:
             # 使用cmdkey命令保存凭据
             target = f"TERMSRV/{hostname}"
-
+            username = "administrator"
             # 先删除旧的凭据（如果存在）
             subprocess.run(
                 f"cmdkey /delete:{target}", shell=True, capture_output=True, timeout=5
@@ -153,10 +155,10 @@ class RDPHelper:
             hostname, port = cls.parse_host(conn_info.host)
             host_with_port = f"{hostname}:{port}"
 
-            # 步骤1: 保存凭据
+            # 步骤1: 保存凭据，登录用户名固定为administrator
             logger.info("步骤1: 正在保存凭据到Windows凭据管理器...")
             credentials_saved = cls.save_credentials(
-                hostname, conn_info.username, conn_info.password
+                hostname, "administrator", conn_info.password
             )
 
             if not credentials_saved:

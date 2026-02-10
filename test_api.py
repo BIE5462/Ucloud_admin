@@ -70,7 +70,7 @@ def test_user_login():
     try:
         resp = requests.post(
             f"{BASE_URL}/api/auth/login",
-            json={"phone": "13800138000", "password": "123456"},
+            json={"phone": "admin", "password": "Admin123@"},
             headers={"Content-Type": "application/json"},
             timeout=10,
         )

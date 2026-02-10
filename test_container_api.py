@@ -26,7 +26,7 @@ def test_health():
         return False
 
 
-def user_login(phone="12345678900", password="123456"):
+def user_login(phone="123456789", password="123456789"):
     """用户登录，获取 Token"""
     print("\n" + "=" * 60)
     print("步骤 2: 用户登录获取 Token")

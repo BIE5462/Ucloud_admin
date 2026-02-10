@@ -118,10 +118,48 @@ async def create_container(
     # 检查是否已有容器
     existing = await container_service.get_by_user_id(db, current_user.id)
     if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="您已有一个云电脑实例，请先删除后再创建",
-        )
+        if not container_data.force:
+            # 返回特定错误码，提示需要确认删除
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": "您已有一个云电脑实例，是否删除旧实例并创建新实例？",
+                    "existing_container": {
+                        "id": existing.id,
+                        "instance_name": existing.instance_name,
+                        "status": existing.status,
+                        "gpu_type": existing.gpu_type,
+                    },
+                    "require_confirm": True,
+                },
+            )
+
+        # 强制创建：先删除旧实例和数据库记录
+        try:
+            # 1. 调用 UCloud API 删除实例
+            delete_result = await ucloud_service.delete_container(
+                existing.ucloud_instance_id
+            )
+            if not delete_result["success"]:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"删除旧实例失败: {delete_result.get('error', '未知错误')}",
+                )
+
+            # 2. 物理删除数据库记录
+            await container_service.hard_delete_by_user(db, current_user.id)
+
+            # 3. 清除用户的当前容器ID
+            current_user.current_container_id = None
+            await db.commit()
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"删除旧实例时出错: {str(e)}",
+            )
 
     # 检查余额
     min_balance = await config_service.get_min_balance_to_start(db)

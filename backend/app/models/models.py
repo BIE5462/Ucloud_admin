@@ -61,7 +61,6 @@ class ContainerRecord(Base):
         Integer,
         ForeignKey("m_user.id"),
         nullable=False,
-        unique=True,
         comment="所属用户ID",
     )
     ucloud_instance_id = Column(String(100), nullable=False, comment="UCloud实例ID")

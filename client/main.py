@@ -10,6 +10,7 @@
 
 import sys
 import logging
+import time
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -184,13 +185,15 @@ class LoginDialog(QDialog):
         self.login_btn.setText("登录中...")
 
         try:
-            success, result = api_client.login(phone, password)
+            result = api_client.login(phone, password)
 
-            if success:
-                self.user_info = result.get("user", {})
+            if result.is_ok():
+                self.user_info = result.data.get("user", {})
                 self.accept()
             else:
-                QMessageBox.critical(self, "登录失败", str(result))
+                # 显示详细错误信息
+                error_msg = result.get_error_display()
+                QMessageBox.critical(self, "登录失败", error_msg)
         except Exception as e:
             QMessageBox.critical(self, "错误", f"登录时发生错误: {str(e)}")
         finally:
@@ -323,6 +326,13 @@ class MainWindow(QMainWindow):
         self.user_info = {}
         self.container_info = None
         self.current_connection_info = None  # 当前连接信息
+
+        # 操作冷却时间跟踪 (20秒)
+        self.operation_cooldown = 20
+        self.last_operation_time = {
+            "stop": 0.0,
+            "delete": 0.0,
+        }
 
         # 设置定时器
         self.status_timer = QTimer()
@@ -604,19 +614,38 @@ class MainWindow(QMainWindow):
         self.balance_label.setText(f"余额: ¥{user_info.get('balance', 0):.2f}")
         self.refresh_container()
 
+    def check_operation_cooldown(self, operation):
+        """检查操作是否在冷却时间内
+
+        Args:
+            operation: 操作类型 ('stop' 或 'delete')
+
+        Returns:
+            tuple: (是否允许操作, 剩余冷却秒数)
+        """
+        last_time = self.last_operation_time.get(operation, 0)
+        elapsed = time.time() - last_time
+        if elapsed < self.operation_cooldown:
+            remaining = int(self.operation_cooldown - elapsed)
+            return False, remaining
+        return True, 0
+
     def refresh_container(self):
         """刷新云电脑信息"""
         try:
-            resp = api_client.get_my_container()
-            if resp.get("code") == 200:
-                data = resp.get("data", {})
+            result = api_client.get_my_container()
+            if result.is_ok():
+                data = result.data or {}
                 if data.get("has_container"):
-                    self.container_info = data.get("container")
+                    self.container_info = data.get("container", {})
                     self.content_stack.setCurrentIndex(1)
                     self.update_container_display()
 
                     # 如果正在运行，启动定时器
-                    if self.container_info.get("status") == "running":
+                    if (
+                        self.container_info
+                        and self.container_info.get("status") == "running"
+                    ):
                         if not self.status_timer.isActive():
                             self.status_timer.start(
                                 self.config.auto_refresh_interval * 1000
@@ -674,9 +703,9 @@ class MainWindow(QMainWindow):
     def update_status(self):
         """更新状态（定时调用）"""
         try:
-            resp = api_client.get_container_status()
-            if resp.get("code") == 200:
-                data = resp.get("data", {})
+            result = api_client.get_container_status()
+            if result.is_ok():
+                data = result.data or {}
 
                 self.runtime_label.setText(
                     f"本次运行: {data.get('current_running_minutes', 0)} 分钟"
@@ -728,25 +757,35 @@ class MainWindow(QMainWindow):
         if dialog.exec() == QDialog.Accepted:
             name = dialog.name_input.text().strip() or "我的云电脑"
 
-            resp = api_client.create_container(instance_name=name)
+            result = api_client.create_container(instance_name=name)
 
-            if resp.get("code") == 200:
+            if result.is_ok():
                 QMessageBox.information(self, "成功", "云电脑创建成功！")
                 self.refresh_container()
             else:
-                QMessageBox.critical(self, "失败", resp.get("message", "创建失败"))
+                QMessageBox.critical(self, "失败", result.get_error_display())
 
     def start_container(self):
         """启动云电脑"""
-        resp = api_client.start_container()
-        if resp.get("code") == 200:
+        result = api_client.start_container()
+        if result.is_ok():
             QMessageBox.information(self, "成功", "云电脑启动成功！")
             self.refresh_container()
         else:
-            QMessageBox.critical(self, "失败", resp.get("message", "启动失败"))
+            QMessageBox.critical(self, "失败", result.get_error_display())
 
     def stop_container(self):
         """停止云电脑"""
+        # 检查冷却时间
+        can_operate, remaining = self.check_operation_cooldown("stop")
+        if not can_operate:
+            QMessageBox.warning(
+                self,
+                "操作过于频繁",
+                f"请等待 {remaining} 秒后再试",
+            )
+            return
+
         reply = QMessageBox.question(
             self,
             "确认停止",
@@ -756,9 +795,11 @@ class MainWindow(QMainWindow):
         )
 
         if reply == QMessageBox.Yes:
-            resp = api_client.stop_container()
-            if resp.get("code") == 200:
-                data = resp.get("data", {})
+            # 记录操作时间
+            self.last_operation_time["stop"] = time.time()
+            result = api_client.stop_container()
+            if result.is_ok():
+                data = result.data or {}
                 session = data.get("this_session", {})
                 QMessageBox.information(
                     self,
@@ -770,7 +811,7 @@ class MainWindow(QMainWindow):
                 self.status_timer.stop()
                 self.refresh_container()
             else:
-                QMessageBox.critical(self, "失败", resp.get("message", "停止失败"))
+                QMessageBox.critical(self, "失败", result.get_error_display())
 
     def open_remote_desktop(self):
         """打开远程桌面 - 一键自动连接"""
@@ -832,14 +873,7 @@ class MainWindow(QMainWindow):
                 auto_connect=self.config.rdp_auto_connect,
             )
 
-            if success:
-                # 显示成功信息
-                msg_box = QMessageBox(self)
-                msg_box.setWindowTitle("远程桌面")
-                msg_box.setText(message)
-                msg_box.setIcon(QMessageBox.Information)
-                msg_box.exec()
-            else:
+            if not success:
                 # 连接失败，显示手动连接信息
                 QMessageBox.warning(
                     self,
@@ -865,6 +899,27 @@ class MainWindow(QMainWindow):
 
     def delete_container(self):
         """删除云电脑"""
+        # 检查实例是否在运行
+        if self.container_info:
+            status = self.container_info.get("status", "")
+            if status == "running":
+                QMessageBox.warning(
+                    self,
+                    "无法删除",
+                    "实例正在运行中，请先停止实例后再删除。",
+                )
+                return
+
+        # 检查冷却时间
+        can_operate, remaining = self.check_operation_cooldown("delete")
+        if not can_operate:
+            QMessageBox.warning(
+                self,
+                "操作过于频繁",
+                f"请等待 {remaining} 秒后再试",
+            )
+            return
+
         reply = QMessageBox.warning(
             self,
             "⚠️ 警告",
@@ -874,20 +929,22 @@ class MainWindow(QMainWindow):
         )
 
         if reply == QMessageBox.Yes:
-            resp = api_client.delete_container()
-            if resp.get("code") == 200:
+            # 记录操作时间
+            self.last_operation_time["delete"] = time.time()
+            result = api_client.delete_container()
+            if result.is_ok():
                 QMessageBox.information(self, "成功", "云电脑已删除")
                 self.status_timer.stop()
                 self.current_connection_info = None
                 self.refresh_container()
             else:
-                QMessageBox.critical(self, "失败", resp.get("message", "删除失败"))
+                QMessageBox.critical(self, "失败", result.get_error_display())
 
     def show_billing(self):
         """显示账单"""
-        resp = api_client.get_billing_statistics()
-        if resp.get("code") == 200:
-            data = resp.get("data", {})
+        result = api_client.get_billing_statistics()
+        if result.is_ok():
+            data = result.data or {}
             msg = (
                 f"💰 账单统计\n\n"
                 f"━━━━━━━━━━━━━━━━\n"
@@ -900,7 +957,7 @@ class MainWindow(QMainWindow):
             )
             QMessageBox.information(self, "账单统计", msg)
         else:
-            QMessageBox.warning(self, "错误", resp.get("message", "获取账单失败"))
+            QMessageBox.warning(self, "错误", result.get_error_display())
 
     def show_help(self):
         """显示帮助"""

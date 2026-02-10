@@ -94,6 +94,7 @@ class ContainerCreate(BaseModel):
     memory_gb: int = 32
     storage_gb: int = 100
     instance_name: str
+    force: bool = False  # 强制创建，删除已有实例
 
 
 class ContainerInfo(BaseModel):

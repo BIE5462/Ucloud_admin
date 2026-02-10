@@ -278,6 +278,23 @@ class ContainerService:
         await db.commit()
 
     @staticmethod
+    async def hard_delete_by_user(
+        db: AsyncSession, user_id: int
+    ) -> Optional[ContainerRecord]:
+        """物理删除用户的所有容器记录"""
+        result = await db.execute(
+            select(ContainerRecord).where(ContainerRecord.user_id == user_id)
+        )
+        containers = result.scalars().all()
+        deleted_container = None
+        for container in containers:
+            deleted_container = container
+            await db.delete(container)
+        if containers:
+            await db.commit()
+        return deleted_container
+
+    @staticmethod
     async def list_running_containers(db: AsyncSession) -> List[ContainerRecord]:
         """获取所有运行中的容器"""
         result = await db.execute(
