@@ -7,10 +7,13 @@ from typing import Optional
 from app.db.database import get_db
 from app.api.auth import get_current_admin, get_current_super_admin
 from app.schemas.schemas import (
-    ResponseData,
     UserCreate,
     UserUpdate,
+    UserInfo,
+    UserBalanceChange,
     UserResetPassword,
+    ResponseData,
+    PaginationResponse,
 )
 from app.services.crud_service import (
     user_service,
@@ -18,7 +21,7 @@ from app.services.crud_service import (
     log_service,
 )
 from app.core.security import get_password_hash
-from app.models.models import BillingChargeRecord
+from app.models.models import User, BillingChargeRecord, BalanceLog
 
 router = APIRouter(prefix="/admin/users", tags=["用户管理"])
 
@@ -314,9 +317,7 @@ class BalanceChangeRequest:
 @router.post("/{user_id}/balance", response_model=ResponseData)
 async def change_user_balance(
     user_id: int,
-    type: str,
-    amount: float,
-    description: Optional[str] = None,
+    recharge_data: UserBalanceChange,
     current_admin=Depends(get_current_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -324,6 +325,10 @@ async def change_user_balance(
     user = await user_service.get_by_id(db, user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+
+    type = recharge_data.type
+    amount = recharge_data.amount
+    description = recharge_data.description
 
     if type not in ["recharge", "deduct"]:
         raise HTTPException(
@@ -339,10 +344,32 @@ async def change_user_balance(
             )
     else:
         change_amount = abs(amount)
+        # 管理员给用户充值时，扣除管理员余额
+        if current_admin.role != "super_admin":
+            if current_admin.balance < change_amount:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"代理余额不足，当前余额: ¥{current_admin.balance:.2f}",
+                )
+            admin_balance_before = current_admin.balance
+            current_admin.balance -= change_amount
+            # 记录管理员余额变动日志
+            admin_balance_log = BalanceLog(
+                account_type="admin",
+                account_id=current_admin.id,
+                change_type="deduct",
+                amount=-change_amount,
+                balance_before=admin_balance_before,
+                balance_after=current_admin.balance,
+                source="manual",
+                remark=f"给用户 {user.company_name} 充值",
+                operator_id=current_admin.id,
+            )
+            db.add(admin_balance_log)
 
     balance_before = user.balance
 
-    # 更新余额
+    # 更新用户余额
     await user_service.update_balance(
         db,
         user,
@@ -354,7 +381,25 @@ async def change_user_balance(
         operator_type="admin",
     )
 
-    # 记录日志
+    # 获取更新后的余额
+    await db.refresh(user)
+    balance_after = user.balance
+
+    # 记录余额变动日志
+    balance_log = BalanceLog(
+        account_type="user",
+        account_id=user_id,
+        change_type=type,
+        amount=change_amount,
+        balance_before=balance_before,
+        balance_after=balance_after,
+        source="manual",
+        remark=description or ("管理员充值" if type == "recharge" else "管理员扣减"),
+        operator_id=current_admin.id,
+    )
+    db.add(balance_log)
+
+    # 记录管理员操作日志
     await log_service.create_admin_operation_log(
         db,
         current_admin.id,
@@ -362,9 +407,11 @@ async def change_user_balance(
         "user",
         user_id,
         old_value=f"{{balance: {balance_before}}}",
-        new_value=f"{{balance: {user.balance}}}",
+        new_value=f"{{balance: {balance_after}}}",
         description=f"{'充值' if type == 'recharge' else '扣减'} {abs(change_amount)} 元",
     )
+
+    await db.commit()
 
     return ResponseData(
         code=200,
@@ -372,7 +419,7 @@ async def change_user_balance(
         data={
             "user_id": user_id,
             "balance_before": balance_before,
-            "balance_after": user.balance,
+            "balance_after": balance_after,
             "change_amount": change_amount,
         },
     )

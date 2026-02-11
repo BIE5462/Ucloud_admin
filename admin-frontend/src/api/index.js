@@ -204,4 +204,7 @@ export const updatePrice = (data) =>
 export const getContainerLogs = (params) =>
   api.get('/admin/logs/container', { params })
 
+export const getBalanceLogs = (params) =>
+  api.get('/admin/balance-logs', { params })
+
 export default api

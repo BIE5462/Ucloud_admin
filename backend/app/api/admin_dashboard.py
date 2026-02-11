@@ -45,6 +45,10 @@ async def get_dashboard(
     # 总余额（当前管理员的余额）
     total_balance = current_admin.balance or 0
 
+    # 剩余可开通用户数
+    max_users = current_admin.max_users or 10
+    remaining_users = max(0, max_users - total_users)
+
     # 今日收入（仅当前管理员用户的消费）
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     today_income_query = (
@@ -145,6 +149,7 @@ async def get_dashboard(
                 "stopped_containers": stopped_containers,
                 "total_balance": round(total_balance, 2),
                 "today_income": round(today_income, 2),
+                "remaining_users": remaining_users,
             },
             "statistics": {
                 "today_new_users": today_new_users,

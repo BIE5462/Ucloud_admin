@@ -90,6 +90,12 @@ class AdminRecharge(BaseModel):
     description: Optional[str] = None
 
 
+class UserBalanceChange(BaseModel):
+    type: str  # recharge / deduct
+    amount: float
+    description: Optional[str] = None
+
+
 class AdminInfo(BaseModel):
     id: int
     username: str

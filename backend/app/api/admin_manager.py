@@ -12,6 +12,7 @@ from app.schemas.schemas import (
 )
 from app.services.crud_service import admin_service, log_service
 from app.core.security import get_password_hash
+from app.models.models import Admin, BalanceLog
 
 router = APIRouter(prefix="/admin/admins", tags=["管理员管理"])
 
@@ -273,7 +274,23 @@ async def recharge_admin_balance(
 
     await db.commit()
 
-    # 记录日志
+    # 记录余额变动日志
+    balance_log = BalanceLog(
+        account_type="admin",
+        account_id=admin_id,
+        change_type=recharge_data.type,
+        amount=amount,
+        balance_before=balance_before,
+        balance_after=target_admin.balance,
+        source="manual",
+        remark=recharge_data.description
+        or f"{'充值' if recharge_data.type == 'recharge' else '扣减'} ¥{abs(amount):.2f}",
+        operator_id=current_admin.id,
+    )
+    db.add(balance_log)
+    await db.commit()
+
+    # 记录操作日志
     await log_service.create_admin_operation_log(
         db,
         current_admin.id,

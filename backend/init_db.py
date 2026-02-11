@@ -18,6 +18,7 @@ from app.models.models import (
     ContainerLog,
     SystemConfig,
     AdminOperationLog,
+    BalanceLog,
 )
 from sqlalchemy import text
 
@@ -113,6 +114,7 @@ async def clear_existing_data():
             # 1. 删除日志表
             await db.execute(ContainerLog.__table__.delete())
             await db.execute(AdminOperationLog.__table__.delete())
+            await db.execute(BalanceLog.__table__.delete())
 
             # 2. 删除计费记录
             await db.execute(BillingChargeRecord.__table__.delete())

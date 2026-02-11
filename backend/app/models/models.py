@@ -95,8 +95,8 @@ class ContainerRecord(Base):
     started_at = Column(DateTime(timezone=True), nullable=True, comment="本次启动时间")
     stopped_at = Column(DateTime(timezone=True), nullable=True, comment="本次停止时间")
     deleted_at = Column(DateTime(timezone=True), nullable=True)
-    total_running_minutes = Column(Integer, default=0, comment="累计运行分钟数")
-    total_cost = Column(Float, default=0.0, comment="累计消费金额")
+    total_running_minutes = Column(Integer, default=0, comment="累计运行分钟数", server_default="0")
+    total_cost = Column(Float, default=0.0, comment="累计消费金额", server_default="0.0")
     connection_host = Column(String(100), nullable=True, comment="连接地址")
     connection_port = Column(Integer, default=3389, comment="连接端口")
     connection_username = Column(String(50), nullable=True, comment="连接用户名")
@@ -181,4 +181,27 @@ class AdminOperationLog(Base):
     new_value = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
     ip_address = Column(String(50), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class BalanceLog(Base):
+    """余额变动日志表"""
+
+    __tablename__ = "balance_log"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    account_type = Column(String(20), nullable=False, comment="账户类型：admin/user")
+    account_id = Column(Integer, nullable=False, comment="账户ID")
+    change_type = Column(
+        String(50), nullable=False, comment="变动类型：recharge/deduct/consume/refund"
+    )
+    amount = Column(Float, nullable=False, comment="变动金额")
+    balance_before = Column(Float, nullable=False, comment="变动前余额")
+    balance_after = Column(Float, nullable=False, comment="变动后余额")
+    source = Column(String(50), nullable=True, comment="来源：manual/system/auto")
+    related_id = Column(Integer, nullable=True, comment="关联ID（如订单ID、容器ID等）")
+    remark = Column(Text, nullable=True, comment="备注")
+    operator_id = Column(
+        Integer, ForeignKey("m_admin.id"), nullable=True, comment="操作人ID"
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())

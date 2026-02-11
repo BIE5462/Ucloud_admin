@@ -71,10 +71,9 @@ class UserService:
         operator_id: int = None,
         operator_type: str = "system",
     ):
-        """更新用户余额"""
+        """更新用户余额（不提交事务，由调用方控制）"""
         new_balance = user.balance + amount
         user.balance = new_balance
-        await db.commit()
 
     @staticmethod
     async def list_users(
@@ -288,6 +287,7 @@ class ContainerService:
         end_time = container.stopped_at or datetime.utcnow()
         running_seconds = (end_time - container.started_at).total_seconds()
         running_minutes = int(running_seconds / 60)
+        running_minutes = max(0, running_minutes)
         cost = running_minutes * container.price_per_minute
 
         return {"running_minutes": running_minutes, "cost": round(cost, 2)}
@@ -297,8 +297,8 @@ class ContainerService:
         db: AsyncSession, container: ContainerRecord, minutes: int, cost: float
     ):
         """添加运行时间和费用"""
-        container.total_running_minutes += minutes
-        container.total_cost += cost
+        container.total_running_minutes += max(0, minutes)
+        container.total_cost += max(0.0, cost)
         await db.commit()
 
     @staticmethod

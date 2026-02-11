@@ -59,16 +59,20 @@ const menuItems = computed(() => {
   const items = [
     { path: '/dashboard', title: '仪表盘', icon: 'Odometer' },
     { path: '/users', title: '用户管理', icon: 'User' },
-    { path: '/logs', title: '日志中心', icon: 'Document' }
   ]
-  
+
   if (adminStore.isSuperAdmin) {
     items.push(
       { path: '/admins', title: '管理员管理', icon: 'UserFilled' },
+      { path: '/logs', title: '日志中心', icon: 'Document' },
       { path: '/config', title: '系统配置', icon: 'Setting' }
     )
+  } else {
+    items.push(
+      { path: '/logs', title: '日志中心', icon: 'Document' }
+    )
   }
-  
+
   return items
 })
 

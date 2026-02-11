@@ -43,10 +43,6 @@
           </el-button>
         </el-form-item>
       </el-form>
-      
-      <div class="tips">
-        <p>默认账号: admin / Admin123@</p>
-      </div>
     </div>
   </div>
 </template>
@@ -119,14 +115,5 @@ const handleLogin = async () => {
   color: #666;
   margin-bottom: 30px;
   font-size: 14px;
-}
-
-.tips {
-  margin-top: 20px;
-  padding-top: 20px;
-  border-top: 1px solid #eee;
-  text-align: center;
-  color: #999;
-  font-size: 12px;
 }
 </style>

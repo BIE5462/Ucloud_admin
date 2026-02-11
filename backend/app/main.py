@@ -19,6 +19,7 @@ from app.api import (
     admin_config,
     admin_dashboard,
     admin_log,
+    admin_balance_log,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ app.include_router(admin_manager.router, prefix="/api")
 app.include_router(admin_config.router, prefix="/api")
 app.include_router(admin_dashboard.router, prefix="/api")
 app.include_router(admin_log.router, prefix="/api")
+app.include_router(admin_balance_log.router, prefix="/api")
 
 
 @app.get("/")
