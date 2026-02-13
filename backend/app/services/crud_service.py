@@ -246,7 +246,9 @@ class ContainerService:
             user_id=user_id,
             ucloud_instance_id=container_data["instance_id"],
             instance_name=container_data["instance_name"],
-            status="stopped",
+            status="running",
+            started_at=datetime.utcnow(),
+            stopped_at=None,
             gpu_type=container_data["gpu_type"],
             cpu_cores=container_data["cpu_cores"],
             memory_gb=container_data["memory_gb"],
@@ -271,6 +273,7 @@ class ContainerService:
 
         if status == "running":
             container.started_at = datetime.utcnow()
+            container.stopped_at = None
         elif status == "stopped":
             container.stopped_at = datetime.utcnow()
 
@@ -279,8 +282,11 @@ class ContainerService:
         return container
 
     @staticmethod
-    async def calculate_session_stats(container: ContainerRecord) -> dict:
-        """计算本次会话统计"""
+    async def calculate_session_stats(db: AsyncSession, container: ContainerRecord) -> dict:
+        """计算本次会话统计（需要传入db以确保数据最新）"""
+        # 刷新容器数据以确保 started_at 是最新的
+        await db.refresh(container)
+
         if not container.started_at:
             return {"running_minutes": 0, "cost": 0.0}
 

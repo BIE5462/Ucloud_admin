@@ -9,11 +9,9 @@ from app.api.auth import get_current_admin, get_current_super_admin
 from app.schemas.schemas import (
     UserCreate,
     UserUpdate,
-    UserInfo,
     UserBalanceChange,
     UserResetPassword,
     ResponseData,
-    PaginationResponse,
 )
 from app.services.crud_service import (
     user_service,
@@ -21,7 +19,7 @@ from app.services.crud_service import (
     log_service,
 )
 from app.core.security import get_password_hash
-from app.models.models import User, BillingChargeRecord, BalanceLog
+from app.models.models import BillingChargeRecord, BalanceLog
 
 router = APIRouter(prefix="/admin/users", tags=["用户管理"])
 
@@ -131,6 +129,7 @@ async def create_user(
 
     # 2. 检查并扣除代理余额（如有初始充值且不是超级管理员）
     initial_balance = user_data.initial_balance or 0
+    admin_balance_before = None
     if initial_balance > 0 and current_admin.role != "super_admin":
         if current_admin.balance < initial_balance:
             raise HTTPException(
@@ -138,6 +137,7 @@ async def create_user(
                 detail=f"代理余额不足，当前余额: ¥{current_admin.balance:.2f}",
             )
         # 扣除代理余额
+        admin_balance_before = current_admin.balance
         current_admin.balance -= initial_balance
 
     # 3. 创建用户
@@ -153,6 +153,38 @@ async def create_user(
             "created_by": current_admin.id,  # 记录创建者
         },
     )
+
+    # 记录管理员余额变动日志（如有扣除余额）
+    if admin_balance_before is not None:
+        admin_balance_log = BalanceLog(
+            account_type="admin",
+            account_id=current_admin.id,
+            change_type="deduct",
+            amount=-initial_balance,
+            balance_before=admin_balance_before,
+            balance_after=current_admin.balance,
+            source="manual",
+            remark=f"创建用户 {user.company_name} 时扣除初始余额",
+            operator_id=current_admin.id,
+        )
+        db.add(admin_balance_log)
+
+    # 记录用户余额变动日志（如有初始余额）
+    if initial_balance > 0:
+        user_balance_log = BalanceLog(
+            account_type="user",
+            account_id=user.id,
+            change_type="recharge",
+            amount=initial_balance,
+            balance_before=0,
+            balance_after=initial_balance,
+            source="manual",
+            remark="创建用户时初始充值",
+            operator_id=current_admin.id,
+        )
+        db.add(user_balance_log)
+
+    await db.commit()
 
     # 记录日志
     await log_service.create_admin_operation_log(
@@ -273,7 +305,7 @@ async def update_user(
         user_id,
         old_value=old_value,
         new_value=new_value,
-        description=f"更新用户信息",
+        description="更新用户信息",
     )
 
     return ResponseData(code=200, message="更新成功")

@@ -17,7 +17,7 @@ class RDPConnectionInfo:
 
     host: str
     port: int = 3389
-    username: str = "administrator"
+    username: str = "Administrator"
     password: str = ""
     uhost_id: str = ""  # UHost ID，用于日志和调试
 
@@ -48,18 +48,18 @@ class RDPHelper:
 
         Args:
             hostname: 主机名
-            username: administrator
+            username: Administrator
             password: 密码
 
         Returns:
             bool: 是否保存成功
 
-            username固定为administrator
+            username固定为Administrator
         """
         try:
             # 使用cmdkey命令保存凭据
             target = f"TERMSRV/{hostname}"
-            username = "administrator"
+            username = "Administrator"
             # 先删除旧的凭据（如果存在）
             subprocess.run(
                 f"cmdkey /delete:{target}", shell=True, capture_output=True, timeout=5
@@ -155,10 +155,10 @@ class RDPHelper:
             hostname, port = cls.parse_host(conn_info.host)
             host_with_port = f"{hostname}:{port}"
 
-            # 步骤1: 保存凭据，登录用户名固定为administrator
+            # 步骤1: 保存凭据，登录用户名固定为Administrator
             logger.info("步骤1: 正在保存凭据到Windows凭据管理器...")
             credentials_saved = cls.save_credentials(
-                hostname, "administrator", conn_info.password
+                hostname, "Administrator", conn_info.password
             )
 
             if not credentials_saved:
@@ -330,7 +330,7 @@ class NonWindowsRDPHelper:
 
 
 def get_rdp_instructions(
-    host: str, username: str = "administrator", password: str = ""
+    host: str, username: str = "Administrator", password: str = ""
 ) -> str:
     """
     获取当前系统的RDP连接说明

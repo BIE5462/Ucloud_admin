@@ -54,7 +54,7 @@ async def charge_running_containers():
                     if result["success"]:
                         # 更新容器状态
                         stats = await container_service.calculate_session_stats(
-                            container
+                            db, container
                         )
                         await container_service.add_running_time(
                             db, container, stats["running_minutes"], stats["cost"]
@@ -99,7 +99,7 @@ async def charge_running_containers():
 
                 # 更新容器累计数据
                 container.total_running_minutes += 1
-                container.total_cost += container.price_per_minute
+                container.total_cost += max(0.0, container.price_per_minute)
 
                 await db.commit()
 

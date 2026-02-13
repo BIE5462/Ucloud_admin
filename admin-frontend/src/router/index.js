@@ -27,6 +27,12 @@ const routes = [
         meta: { title: '用户管理', icon: 'User' }
       },
       {
+        path: 'logs',
+        name: 'Logs',
+        component: () => import('@/views/Logs.vue'),
+        meta: { title: '日志中心', icon: 'Document' }
+      },
+      {
         path: 'admins',
         name: 'Admins',
         component: () => import('@/views/Admins.vue'),
@@ -37,12 +43,6 @@ const routes = [
         name: 'Config',
         component: () => import('@/views/Config.vue'),
         meta: { title: '系统配置', icon: 'Setting', requireSuper: true }
-      },
-      {
-        path: 'logs',
-        name: 'Logs',
-        component: () => import('@/views/Logs.vue'),
-        meta: { title: '日志中心', icon: 'Document' }
       }
     ]
   }

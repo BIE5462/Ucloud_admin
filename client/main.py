@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QClipboard
 
 # 导入自定义模块
 from config import get_config, ConfigManager
@@ -87,7 +87,7 @@ class LoginDialog(QDialog):
         layout.addWidget(subtitle)
 
         # 手机号
-        phone_label = QLabel("手机号:")
+        phone_label = QLabel("手机号-账号:")
         phone_label.setStyleSheet("color: #606266; font-weight: bold;")
         layout.addWidget(phone_label)
 
@@ -499,27 +499,68 @@ class MainWindow(QMainWindow):
         self.status_card.setLayout(status_layout)
         layout.addWidget(self.status_card)
 
-        # 连接信息
+        # 连接信息 - 只占一半宽度
+        conn_wrapper = QWidget()
+        conn_wrapper.setMaximumWidth(500)
+        conn_layout_main = QVBoxLayout()
+        conn_layout_main.setContentsMargins(0, 0, 0, 0)
+        
         self.conn_card = QGroupBox("连接信息")
         self.conn_card.setStyleSheet(self.status_card.styleSheet())
         conn_layout = QGridLayout()
         conn_layout.setSpacing(10)
 
+        # 地址
+        host_layout = QHBoxLayout()
         self.host_label = QLabel("地址: -")
-        conn_layout.addWidget(self.host_label, 0, 0)
+        self.host_label.setMinimumWidth(250)
+        self.copy_host_btn = QPushButton("复制")
+        self.copy_host_btn.setStyleSheet("padding: 4px 10px;")
+        self.copy_host_btn.clicked.connect(lambda: self.copy_to_clipboard('host'))
+        host_layout.addWidget(self.host_label)
+        host_layout.addWidget(self.copy_host_btn)
+        conn_layout.addLayout(host_layout, 0, 0)
 
+        # 用户名
+        user_layout = QHBoxLayout()
         self.user_label = QLabel("用户名: -")
-        conn_layout.addWidget(self.user_label, 1, 0)
+        self.user_label.setMinimumWidth(250)
+        self.copy_user_btn = QPushButton("复制")
+        self.copy_user_btn.setStyleSheet("padding: 4px 10px;")
+        self.copy_user_btn.clicked.connect(lambda: self.copy_to_clipboard('user'))
+        user_layout.addWidget(self.user_label)
+        user_layout.addWidget(self.copy_user_btn)
+        conn_layout.addLayout(user_layout, 1, 0)
 
+        # 密码
+        pass_layout = QHBoxLayout()
         self.pass_label = QLabel("密码: -")
-        conn_layout.addWidget(self.pass_label, 2, 0)
+        self.pass_label.setMinimumWidth(250)
+        self.copy_pass_btn = QPushButton("复制")
+        self.copy_pass_btn.setStyleSheet("padding: 4px 10px;")
+        self.copy_pass_btn.clicked.connect(lambda: self.copy_to_clipboard('pass'))
+        pass_layout.addWidget(self.pass_label)
+        pass_layout.addWidget(self.copy_pass_btn)
+        conn_layout.addLayout(pass_layout, 2, 0)
 
+        # UHost ID
+        uhost_layout = QHBoxLayout()
         self.uhost_label = QLabel("UHost ID: -")
-        conn_layout.addWidget(self.uhost_label, 3, 0)
+        self.uhost_label.setMinimumWidth(250)
+        self.copy_uhost_btn = QPushButton("复制")
+        self.copy_uhost_btn.setStyleSheet("padding: 4px 10px;")
+        self.copy_uhost_btn.clicked.connect(lambda: self.copy_to_clipboard('uhost'))
+        uhost_layout.addWidget(self.uhost_label)
+        uhost_layout.addWidget(self.copy_uhost_btn)
+        conn_layout.addLayout(uhost_layout, 3, 0)
 
         self.conn_card.setLayout(conn_layout)
         self.conn_card.setVisible(False)
-        layout.addWidget(self.conn_card)
+        
+        # 将连接信息卡片添加到包装器中
+        conn_layout_main.addWidget(self.conn_card)
+        conn_wrapper.setLayout(conn_layout_main)
+        layout.addWidget(conn_wrapper)
 
         # 操作按钮
         btn_layout = QHBoxLayout()
@@ -707,18 +748,22 @@ class MainWindow(QMainWindow):
             if result.is_ok():
                 data = result.data or {}
 
+                running_minutes = max(0, data.get('current_running_minutes', 0))
+                session_cost = max(0.0, data.get('current_session_cost', 0))
+                balance = max(0.0, data.get('balance', 0))
+
                 self.runtime_label.setText(
-                    f"本次运行: {data.get('current_running_minutes', 0)} 分钟"
+                    f"本次运行: {running_minutes} 分钟"
                 )
                 self.cost_label.setText(
-                    f"本次消费: ¥{data.get('current_session_cost', 0):.2f}"
+                    f"本次消费: ¥{session_cost:.2f}"
                 )
                 self.remaining_label.setText(
                     f"剩余可用: {data.get('remaining_time_formatted', '-')}"
                 )
 
                 # 更新余额
-                self.balance_label.setText(f"余额: ¥{data.get('balance', 0):.2f}")
+                self.balance_label.setText(f"余额: ¥{balance:.2f}")
 
                 # 更新连接信息
                 conn_info = data.get("connection_info", {})
@@ -729,13 +774,13 @@ class MainWindow(QMainWindow):
                     password = conn_info.get("password", "-")
 
                     self.host_label.setText(f"地址: {host}:{port}")
-                    self.user_label.setText(f"用户名: {username}")
+                    self.user_label.setText(f"用户名: Administrator")
                     self.pass_label.setText(f"密码: {password}")
 
                     # 保存连接信息供后续使用
                     self.current_connection_info = {
                         "host": f"{host}:{port}",
-                        "username": username,
+                        "username": "Administrator",
                         "password": password,
                         "uhost_id": conn_info.get("uhost_id", ""),
                     }
@@ -801,12 +846,14 @@ class MainWindow(QMainWindow):
             if result.is_ok():
                 data = result.data or {}
                 session = data.get("this_session", {})
+                running_minutes = max(0, session.get('running_minutes', 0))
+                cost = max(0.0, session.get('cost', 0))
                 QMessageBox.information(
                     self,
                     "已停止",
                     f"云电脑已停止\n\n"
-                    f"本次运行: {session.get('running_minutes', 0)} 分钟\n"
-                    f"本次消费: ¥{session.get('cost', 0):.2f}",
+                    f"本次运行: {running_minutes} 分钟\n"
+                    f"本次消费: ¥{cost:.2f}",
                 )
                 self.status_timer.stop()
                 self.refresh_container()
@@ -854,7 +901,7 @@ class MainWindow(QMainWindow):
                 # 非Windows系统，显示连接说明
                 instructions = get_rdp_instructions(
                     host=host,
-                    username=conn_info.get("username", "administrator"),
+                    username=conn_info.get("username", "Administrator"),
                     password=password,
                 )
 
@@ -881,7 +928,7 @@ class MainWindow(QMainWindow):
                     f"{message}\n\n"
                     f"请手动连接:\n"
                     f"主机: {host}\n"
-                    f"用户名: {conn_info.get('username', 'administrator')}\n"
+                    f"用户名: {conn_info.get('username', 'Administrator')}\n"
                     f"密码: {password}",
                 )
 
@@ -893,7 +940,7 @@ class MainWindow(QMainWindow):
                 f"启动远程桌面时发生错误:\n{str(e)}\n\n"
                 f"请手动连接:\n"
                 f"主机: {host}\n"
-                f"用户名: {conn_info.get('username', 'administrator')}\n"
+                f"用户名: {conn_info.get('username', 'Administrator')}\n"
                 f"密码: {password}",
             )
 
@@ -945,14 +992,19 @@ class MainWindow(QMainWindow):
         result = api_client.get_billing_statistics()
         if result.is_ok():
             data = result.data or {}
+            balance = max(0.0, data.get('balance', 0))
+            today_cost = max(0.0, data.get('today_cost', 0))
+            this_month_cost = max(0.0, data.get('this_month_cost', 0))
+            total_cost = max(0.0, data.get('total_cost', 0))
+            total_running_minutes = max(0, data.get('total_running_minutes', 0))
             msg = (
                 f"💰 账单统计\n\n"
                 f"━━━━━━━━━━━━━━━━\n"
-                f"当前余额: ¥{data.get('balance', 0):.2f}\n"
-                f"今日消费: ¥{data.get('today_cost', 0):.2f}\n"
-                f"本月消费: ¥{data.get('this_month_cost', 0):.2f}\n"
-                f"累计消费: ¥{data.get('total_cost', 0):.2f}\n"
-                f"累计运行: {data.get('total_running_minutes', 0)} 分钟\n"
+                f"当前余额: ¥{balance:.2f}\n"
+                f"今日消费: ¥{today_cost:.2f}\n"
+                f"本月消费: ¥{this_month_cost:.2f}\n"
+                f"累计消费: ¥{total_cost:.2f}\n"
+                f"累计运行: {total_running_minutes} 分钟\n"
                 f"━━━━━━━━━━━━━━━━"
             )
             QMessageBox.information(self, "账单统计", msg)
@@ -988,6 +1040,33 @@ class MainWindow(QMainWindow):
         msg_box.setText(help_text)
         msg_box.setIcon(QMessageBox.Information)
         msg_box.exec()
+
+    def copy_to_clipboard(self, data_type):
+        """复制数据到剪贴板
+
+        Args:
+            data_type: 数据类型 ('host', 'user', 'pass', 'uhost')
+        """
+        clipboard = QApplication.clipboard()
+        
+        if data_type == 'host':
+            if self.current_connection_info:
+                host = self.current_connection_info.get('host', '')
+                clipboard.setText(host)
+                QMessageBox.information(self, "复制成功", f"地址已复制到剪贴板")
+        elif data_type == 'user':
+            clipboard.setText("Administrator")
+            QMessageBox.information(self, "复制成功", f"用户名已复制到剪贴板")
+        elif data_type == 'pass':
+            if self.current_connection_info:
+                password = self.current_connection_info.get('password', '')
+                clipboard.setText(password)
+                QMessageBox.information(self, "复制成功", f"密码已复制到剪贴板")
+        elif data_type == 'uhost':
+            if self.current_connection_info:
+                uhost_id = self.current_connection_info.get('uhost_id', '')
+                clipboard.setText(uhost_id)
+                QMessageBox.information(self, "复制成功", f"UHost ID已复制到剪贴板")
 
     def logout(self):
         """退出登录"""

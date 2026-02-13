@@ -74,7 +74,7 @@ async def get_container_status(
         )
 
     # 计算本次运行统计
-    stats = await container_service.calculate_session_stats(container)
+    stats = await container_service.calculate_session_stats(db, container)
 
     # 计算剩余时间
     remaining_minutes = (
@@ -212,15 +212,25 @@ async def create_container(
         container_id=container.id,
         action="create",
         action_status="success",
+        started_at=container.started_at,
         ip_address=request.client.host,
     )
 
     return ResponseData(
         code=200,
-        message="云电脑创建成功",
+        message="云电脑创建成功，已自动启动",
         data={
             "container_id": container.id,
             "status": container.status,
+            "started_at": container.started_at.isoformat()
+            if container.started_at
+            else None,
+            "connection_info": {
+                "host": container.connection_host,
+                "port": container.connection_port,
+                "username": container.connection_username,
+                "password": container.connection_password,
+            },
             "estimated_time": 120,
         },
     )
@@ -330,7 +340,7 @@ async def stop_container(
         )
 
     # 计算本次会话统计
-    stats = await container_service.calculate_session_stats(container)
+    stats = await container_service.calculate_session_stats(db, container)
 
     # 更新容器累计数据
     await container_service.add_running_time(
@@ -396,7 +406,7 @@ async def delete_container(
     # 如果正在运行，先停止
     if container.status == "running":
         # 计算本次会话统计
-        stats = await container_service.calculate_session_stats(container)
+        stats = await container_service.calculate_session_stats(db, container)
 
         # 更新累计数据
         await container_service.add_running_time(
