@@ -338,6 +338,12 @@ class MainWindow(QMainWindow):
         self.status_timer = QTimer()
         self.status_timer.timeout.connect(self.update_status)
 
+        # 停止并删除的重试机制
+        self.delete_retry_timer = QTimer()
+        self.delete_retry_timer.timeout.connect(self.try_delete_with_retry)
+        self.delete_attempts = 0
+        self.max_delete_attempts = 6  # 最多6次尝试，每次间隔10秒，共60秒
+
         self.setup_ui()
 
     def setup_ui(self):
@@ -504,7 +510,7 @@ class MainWindow(QMainWindow):
         conn_wrapper.setMaximumWidth(500)
         conn_layout_main = QVBoxLayout()
         conn_layout_main.setContentsMargins(0, 0, 0, 0)
-        
+
         self.conn_card = QGroupBox("连接信息")
         self.conn_card.setStyleSheet(self.status_card.styleSheet())
         conn_layout = QGridLayout()
@@ -516,7 +522,7 @@ class MainWindow(QMainWindow):
         self.host_label.setMinimumWidth(250)
         self.copy_host_btn = QPushButton("复制")
         self.copy_host_btn.setStyleSheet("padding: 4px 10px;")
-        self.copy_host_btn.clicked.connect(lambda: self.copy_to_clipboard('host'))
+        self.copy_host_btn.clicked.connect(lambda: self.copy_to_clipboard("host"))
         host_layout.addWidget(self.host_label)
         host_layout.addWidget(self.copy_host_btn)
         conn_layout.addLayout(host_layout, 0, 0)
@@ -527,7 +533,7 @@ class MainWindow(QMainWindow):
         self.user_label.setMinimumWidth(250)
         self.copy_user_btn = QPushButton("复制")
         self.copy_user_btn.setStyleSheet("padding: 4px 10px;")
-        self.copy_user_btn.clicked.connect(lambda: self.copy_to_clipboard('user'))
+        self.copy_user_btn.clicked.connect(lambda: self.copy_to_clipboard("user"))
         user_layout.addWidget(self.user_label)
         user_layout.addWidget(self.copy_user_btn)
         conn_layout.addLayout(user_layout, 1, 0)
@@ -538,7 +544,7 @@ class MainWindow(QMainWindow):
         self.pass_label.setMinimumWidth(250)
         self.copy_pass_btn = QPushButton("复制")
         self.copy_pass_btn.setStyleSheet("padding: 4px 10px;")
-        self.copy_pass_btn.clicked.connect(lambda: self.copy_to_clipboard('pass'))
+        self.copy_pass_btn.clicked.connect(lambda: self.copy_to_clipboard("pass"))
         pass_layout.addWidget(self.pass_label)
         pass_layout.addWidget(self.copy_pass_btn)
         conn_layout.addLayout(pass_layout, 2, 0)
@@ -549,14 +555,14 @@ class MainWindow(QMainWindow):
         self.uhost_label.setMinimumWidth(250)
         self.copy_uhost_btn = QPushButton("复制")
         self.copy_uhost_btn.setStyleSheet("padding: 4px 10px;")
-        self.copy_uhost_btn.clicked.connect(lambda: self.copy_to_clipboard('uhost'))
+        self.copy_uhost_btn.clicked.connect(lambda: self.copy_to_clipboard("uhost"))
         uhost_layout.addWidget(self.uhost_label)
         uhost_layout.addWidget(self.copy_uhost_btn)
         conn_layout.addLayout(uhost_layout, 3, 0)
 
         self.conn_card.setLayout(conn_layout)
         self.conn_card.setVisible(False)
-        
+
         # 将连接信息卡片添加到包装器中
         conn_layout_main.addWidget(self.conn_card)
         conn_wrapper.setLayout(conn_layout_main)
@@ -583,10 +589,10 @@ class MainWindow(QMainWindow):
         """)
         self.start_btn.clicked.connect(self.start_container)
 
-        self.stop_btn = QPushButton("⏹ 停止")
-        self.stop_btn.setStyleSheet("""
+        self.stop_and_delete_btn = QPushButton("⏹ 停止并删除")
+        self.stop_and_delete_btn.setStyleSheet("""
             QPushButton {
-                background-color: #E6A23C;
+                background-color: #F56C6C;
                 color: white;
                 padding: 12px 25px;
                 font-size: 14px;
@@ -595,11 +601,11 @@ class MainWindow(QMainWindow):
                 border: none;
             }
             QPushButton:hover {
-                background-color: #ebb563;
+                background-color: #f78989;
             }
         """)
-        self.stop_btn.clicked.connect(self.stop_container)
-        self.stop_btn.setVisible(False)
+        self.stop_and_delete_btn.clicked.connect(self.stop_and_delete_container)
+        self.stop_and_delete_btn.setVisible(False)
 
         self.connect_btn = QPushButton("🖥️ 连接远程桌面")
         self.connect_btn.setStyleSheet("""
@@ -619,28 +625,10 @@ class MainWindow(QMainWindow):
         self.connect_btn.clicked.connect(self.open_remote_desktop)
         self.connect_btn.setVisible(False)
 
-        self.delete_btn = QPushButton("🗑️ 删除")
-        self.delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #F56C6C;
-                color: white;
-                padding: 12px 25px;
-                font-size: 14px;
-                font-weight: bold;
-                border-radius: 4px;
-                border: none;
-            }
-            QPushButton:hover {
-                background-color: #f78989;
-            }
-        """)
-        self.delete_btn.clicked.connect(self.delete_container)
-
         btn_layout.addWidget(self.start_btn)
-        btn_layout.addWidget(self.stop_btn)
+        btn_layout.addWidget(self.stop_and_delete_btn)
         btn_layout.addWidget(self.connect_btn)
         btn_layout.addStretch()
-        btn_layout.addWidget(self.delete_btn)
 
         layout.addLayout(btn_layout)
         layout.addStretch()
@@ -734,7 +722,7 @@ class MainWindow(QMainWindow):
         # 按钮状态
         is_running = status_text == "running"
         self.start_btn.setVisible(not is_running)
-        self.stop_btn.setVisible(is_running)
+        self.stop_and_delete_btn.setVisible(is_running)
         self.connect_btn.setVisible(is_running)
         self.conn_card.setVisible(is_running)
 
@@ -748,16 +736,12 @@ class MainWindow(QMainWindow):
             if result.is_ok():
                 data = result.data or {}
 
-                running_minutes = max(0, data.get('current_running_minutes', 0))
-                session_cost = max(0.0, data.get('current_session_cost', 0))
-                balance = max(0.0, data.get('balance', 0))
+                running_minutes = max(0, data.get("current_running_minutes", 0))
+                session_cost = max(0.0, data.get("current_session_cost", 0))
+                balance = max(0.0, data.get("balance", 0))
 
-                self.runtime_label.setText(
-                    f"本次运行: {running_minutes} 分钟"
-                )
-                self.cost_label.setText(
-                    f"本次消费: ¥{session_cost:.2f}"
-                )
+                self.runtime_label.setText(f"本次运行: {running_minutes} 分钟")
+                self.cost_label.setText(f"本次消费: ¥{session_cost:.2f}")
                 self.remaining_label.setText(
                     f"剩余可用: {data.get('remaining_time_formatted', '-')}"
                 )
@@ -819,8 +803,8 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.critical(self, "失败", result.get_error_display())
 
-    def stop_container(self):
-        """停止云电脑"""
+    def stop_and_delete_container(self):
+        """停止云电脑并在关机完成后自动删除"""
         # 检查冷却时间
         can_operate, remaining = self.check_operation_cooldown("stop")
         if not can_operate:
@@ -833,8 +817,10 @@ class MainWindow(QMainWindow):
 
         reply = QMessageBox.question(
             self,
-            "确认停止",
-            "确定要停止云电脑吗？\n停止后将无法继续工作，但数据会保留。",
+            "确认停止并删除",
+            "确定要停止云电脑并在关机完成后自动删除吗？\n"
+            "⚠️ 删除后数据将不可恢复！\n\n"
+            "系统将在关机完成后自动删除实例（最多等待60秒）。",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -842,23 +828,92 @@ class MainWindow(QMainWindow):
         if reply == QMessageBox.Yes:
             # 记录操作时间
             self.last_operation_time["stop"] = time.time()
+
+            # 发送停止指令
             result = api_client.stop_container()
-            if result.is_ok():
-                data = result.data or {}
-                session = data.get("this_session", {})
-                running_minutes = max(0, session.get('running_minutes', 0))
-                cost = max(0.0, session.get('cost', 0))
-                QMessageBox.information(
-                    self,
-                    "已停止",
-                    f"云电脑已停止\n\n"
-                    f"本次运行: {running_minutes} 分钟\n"
-                    f"本次消费: ¥{cost:.2f}",
-                )
-                self.status_timer.stop()
-                self.refresh_container()
-            else:
-                QMessageBox.critical(self, "失败", result.get_error_display())
+            if not result.is_ok():
+                QMessageBox.critical(self, "停止失败", result.get_error_display())
+                return
+
+            # 停止状态更新定时器
+            self.status_timer.stop()
+
+            # 创建倒计时对话框
+            self.processing_dialog = QDialog(self)
+            self.processing_dialog.setWindowTitle("正在处理")
+            self.processing_dialog.setFixedSize(350, 150)
+            self.processing_dialog.setModal(True)
+
+            dialog_layout = QVBoxLayout()
+            dialog_layout.setSpacing(15)
+            dialog_layout.setContentsMargins(20, 20, 20, 20)
+
+            # 提示文本
+            self.processing_label = QLabel(
+                "实例正在关机，关机完成后将自动删除...\n请勿关闭客户端。"
+            )
+            self.processing_label.setAlignment(Qt.AlignCenter)
+            dialog_layout.addWidget(self.processing_label)
+
+            # 倒计时显示
+            self.countdown_label = QLabel("倒计时: 60 秒")
+            self.countdown_label.setAlignment(Qt.AlignCenter)
+            self.countdown_label.setStyleSheet(
+                "font-size: 18px; font-weight: bold; color: #F56C6C;"
+            )
+            dialog_layout.addWidget(self.countdown_label)
+
+            self.processing_dialog.setLayout(dialog_layout)
+            self.processing_dialog.show()
+
+            # 启动倒计时定时器（每秒更新一次）
+            self.countdown_value = 60
+            self.countdown_timer = QTimer()
+            self.countdown_timer.timeout.connect(self.update_countdown)
+            self.countdown_timer.start(1000)
+
+            # 初始化重试机制
+            self.delete_attempts = 0
+            # 10秒后开始首次尝试删除
+            self.delete_retry_timer.start(10000)
+
+    def update_countdown(self):
+        """更新倒计时显示"""
+        self.countdown_value -= 1
+        if hasattr(self, "countdown_label"):
+            self.countdown_label.setText(f"倒计时: {self.countdown_value} 秒")
+
+    def try_delete_with_retry(self):
+        """尝试删除实例，失败则重试"""
+        self.delete_attempts += 1
+
+        result = api_client.delete_container()
+
+        if result.is_ok():
+            # 删除成功
+            self.delete_retry_timer.stop()
+            self.countdown_timer.stop()
+            if hasattr(self, "processing_dialog"):
+                self.processing_dialog.close()
+            QMessageBox.information(self, "完成", "云电脑已停止并自动删除成功")
+            self.current_connection_info = None
+            self.refresh_container()
+            return
+
+        # 删除失败，检查是否达到最大重试次数
+        if self.delete_attempts >= self.max_delete_attempts:
+            # 超过60秒，停止重试
+            self.delete_retry_timer.stop()
+            self.countdown_timer.stop()
+            if hasattr(self, "processing_dialog"):
+                self.processing_dialog.close()
+            QMessageBox.warning(
+                self,
+                "删除超时",
+                "等待已超过60秒，实例可能仍在关机中。\n请稍后手动刷新并删除实例。",
+            )
+            self.refresh_container()
+        # 否则继续等待，timer会在10秒后再次触发
 
     def open_remote_desktop(self):
         """打开远程桌面 - 一键自动连接"""
@@ -944,59 +999,16 @@ class MainWindow(QMainWindow):
                 f"密码: {password}",
             )
 
-    def delete_container(self):
-        """删除云电脑"""
-        # 检查实例是否在运行
-        if self.container_info:
-            status = self.container_info.get("status", "")
-            if status == "running":
-                QMessageBox.warning(
-                    self,
-                    "无法删除",
-                    "实例正在运行中，请先停止实例后再删除。",
-                )
-                return
-
-        # 检查冷却时间
-        can_operate, remaining = self.check_operation_cooldown("delete")
-        if not can_operate:
-            QMessageBox.warning(
-                self,
-                "操作过于频繁",
-                f"请等待 {remaining} 秒后再试",
-            )
-            return
-
-        reply = QMessageBox.warning(
-            self,
-            "⚠️ 警告",
-            "删除云电脑将清除所有数据且不可恢复！\n\n确定要删除吗？",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-
-        if reply == QMessageBox.Yes:
-            # 记录操作时间
-            self.last_operation_time["delete"] = time.time()
-            result = api_client.delete_container()
-            if result.is_ok():
-                QMessageBox.information(self, "成功", "云电脑已删除")
-                self.status_timer.stop()
-                self.current_connection_info = None
-                self.refresh_container()
-            else:
-                QMessageBox.critical(self, "失败", result.get_error_display())
-
     def show_billing(self):
         """显示账单"""
         result = api_client.get_billing_statistics()
         if result.is_ok():
             data = result.data or {}
-            balance = max(0.0, data.get('balance', 0))
-            today_cost = max(0.0, data.get('today_cost', 0))
-            this_month_cost = max(0.0, data.get('this_month_cost', 0))
-            total_cost = max(0.0, data.get('total_cost', 0))
-            total_running_minutes = max(0, data.get('total_running_minutes', 0))
+            balance = max(0.0, data.get("balance", 0))
+            today_cost = max(0.0, data.get("today_cost", 0))
+            this_month_cost = max(0.0, data.get("this_month_cost", 0))
+            total_cost = max(0.0, data.get("total_cost", 0))
+            total_running_minutes = max(0, data.get("total_running_minutes", 0))
             msg = (
                 f"💰 账单统计\n\n"
                 f"━━━━━━━━━━━━━━━━\n"
@@ -1023,7 +1035,8 @@ class MainWindow(QMainWindow):
 
 3️⃣  云电脑按分钟计费，余额不足会自动停止
 
-4️⃣  停止后实例数据会保留，可再次启动
+4️⃣  点击"停止并删除"停止实例并自动删除
+   ⚠️ 停止后数据将被删除，不可恢复！
 
 5️⃣  删除实例后才能创建新的云电脑
 
@@ -1048,23 +1061,23 @@ class MainWindow(QMainWindow):
             data_type: 数据类型 ('host', 'user', 'pass', 'uhost')
         """
         clipboard = QApplication.clipboard()
-        
-        if data_type == 'host':
+
+        if data_type == "host":
             if self.current_connection_info:
-                host = self.current_connection_info.get('host', '')
+                host = self.current_connection_info.get("host", "")
                 clipboard.setText(host)
                 QMessageBox.information(self, "复制成功", f"地址已复制到剪贴板")
-        elif data_type == 'user':
+        elif data_type == "user":
             clipboard.setText("Administrator")
             QMessageBox.information(self, "复制成功", f"用户名已复制到剪贴板")
-        elif data_type == 'pass':
+        elif data_type == "pass":
             if self.current_connection_info:
-                password = self.current_connection_info.get('password', '')
+                password = self.current_connection_info.get("password", "")
                 clipboard.setText(password)
                 QMessageBox.information(self, "复制成功", f"密码已复制到剪贴板")
-        elif data_type == 'uhost':
+        elif data_type == "uhost":
             if self.current_connection_info:
-                uhost_id = self.current_connection_info.get('uhost_id', '')
+                uhost_id = self.current_connection_info.get("uhost_id", "")
                 clipboard.setText(uhost_id)
                 QMessageBox.information(self, "复制成功", f"UHost ID已复制到剪贴板")
 
