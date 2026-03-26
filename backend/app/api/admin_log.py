@@ -1,13 +1,13 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from typing import Optional
 
 from app.db.database import get_db
 from app.api.auth import get_current_admin
 from app.schemas.schemas import ResponseData
-from app.models.models import ContainerLog, User, Admin
+from app.models.models import ContainerLog, User, Admin, UserLoginLog
 
 router = APIRouter(prefix="/admin/logs", tags=["日志管理"])
 
@@ -82,6 +82,92 @@ async def get_container_logs(
                 "cost": log.cost,
                 "ip_address": log.ip_address,
                 "error_message": log.error_message,
+                "created_at": log.created_at.isoformat() if log.created_at else None,
+            }
+        )
+
+    return ResponseData(
+        code=200,
+        message="success",
+        data={
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "items": items,
+        },
+    )
+
+
+@router.get("/login", response_model=ResponseData)
+async def get_user_login_logs(
+    page: int = 1,
+    page_size: int = 20,
+    user_id: Optional[int] = None,
+    admin_id: Optional[int] = None,
+    keyword: Optional[str] = None,
+    login_status: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    current_admin=Depends(get_current_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """获取用户登录日志列表"""
+    query = (
+        select(UserLoginLog, User.company_name, Admin.username)
+        .outerjoin(User, UserLoginLog.user_id == User.id)
+        .outerjoin(Admin, UserLoginLog.admin_id == Admin.id)
+    )
+
+    if current_admin.role != "super_admin":
+        query = query.where(UserLoginLog.admin_id == current_admin.id)
+    elif admin_id:
+        query = query.where(UserLoginLog.admin_id == admin_id)
+
+    if user_id:
+        query = query.where(UserLoginLog.user_id == user_id)
+
+    if keyword:
+        query = query.where(
+            or_(
+                UserLoginLog.phone.contains(keyword),
+                User.company_name.contains(keyword),
+                User.phone.contains(keyword),
+            )
+        )
+
+    if login_status:
+        query = query.where(UserLoginLog.login_status == login_status)
+
+    if start_date:
+        start_dt = datetime.fromisoformat(start_date)
+        query = query.where(UserLoginLog.created_at >= start_dt)
+
+    if end_date:
+        end_dt = datetime.fromisoformat(end_date)
+        query = query.where(UserLoginLog.created_at <= end_dt)
+
+    count_query = select(func.count()).select_from(query.subquery())
+    total = await db.scalar(count_query)
+
+    query = query.order_by(UserLoginLog.created_at.desc())
+    query = query.offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(query)
+    rows = result.all()
+
+    items = []
+    for log, user_name, admin_name in rows:
+        items.append(
+            {
+                "id": log.id,
+                "user_id": log.user_id,
+                "admin_id": log.admin_id,
+                "user_name": user_name or "-",
+                "phone": log.phone,
+                "admin_name": admin_name or "-",
+                "login_status": log.login_status,
+                "failure_reason": log.failure_reason,
+                "ip_address": log.ip_address,
+                "user_agent": log.user_agent,
                 "created_at": log.created_at.isoformat() if log.created_at else None,
             }
         )

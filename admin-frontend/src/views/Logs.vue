@@ -5,6 +5,7 @@
         <div class="header-actions">
           <el-tabs v-model="activeTab" @tab-change="handleTabChange">
             <el-tab-pane label="容器操作日志" name="container" />
+            <el-tab-pane label="登录日志" name="login" />
             <el-tab-pane label="余额变化日志" name="balance" />
           </el-tabs>
         </div>
@@ -17,12 +18,12 @@
             placeholder="选择用户"
             clearable
             filterable
-            style="width: 160px; margin-right: 10px;"
+            style="width: 180px; margin-right: 10px;"
           >
             <el-option
               v-for="user in userList"
               :key="user.id"
-              :label="user.company_name"
+              :label="`${user.company_name} (${user.phone})`"
               :value="user.id"
             />
           </el-select>
@@ -41,7 +42,12 @@
               :value="admin.id"
             />
           </el-select>
-          <el-select v-model="containerFilter.action" placeholder="操作类型" clearable style="width: 120px; margin-right: 10px;">
+          <el-select
+            v-model="containerFilter.action"
+            placeholder="操作类型"
+            clearable
+            style="width: 120px; margin-right: 10px;"
+          >
             <el-option label="创建" value="create" />
             <el-option label="启动" value="start" />
             <el-option label="停止" value="stop" />
@@ -50,12 +56,18 @@
           </el-select>
           <el-button type="primary" @click="handleContainerQuery">查询</el-button>
           <el-button @click="handleContainerReset">重置</el-button>
-          <el-button type="success" @click="exportContainerLogs" style="margin-left: auto;">导出CSV</el-button>
+          <el-button
+            type="success"
+            @click="exportContainerLogs"
+            style="margin-left: auto;"
+          >
+            导出CSV
+          </el-button>
         </div>
 
         <el-table :data="containerLogs" v-loading="containerLoading" border>
           <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="user_name" label="用户" min-width="120" />
+          <el-table-column prop="user_name" label="用户" min-width="160" />
           <el-table-column prop="admin_name" label="归属管理员" min-width="120" />
           <el-table-column prop="action" label="操作" width="100">
             <template #default="{ row }">
@@ -64,7 +76,10 @@
           </el-table-column>
           <el-table-column prop="action_status" label="状态" width="90">
             <template #default="{ row }">
-              <el-tag :type="row.action_status === 'success' ? 'success' : 'danger'" size="small">
+              <el-tag
+                :type="row.action_status === 'success' ? 'success' : 'danger'"
+                size="small"
+              >
                 {{ row.action_status === 'success' ? '成功' : '失败' }}
               </el-tag>
             </template>
@@ -91,7 +106,7 @@
               <span v-else>-</span>
             </template>
           </el-table-column>
-          <el-table-column prop="ip_address" label="IP地址" width="130" />
+          <el-table-column prop="ip_address" label="IP地址" width="140" />
           <el-table-column prop="created_at" label="记录时间" width="170">
             <template #default="{ row }">
               {{ formatDateTime(row.created_at) }}
@@ -105,6 +120,126 @@
           :total="containerPagination.total"
           layout="total, sizes, prev, pager, next"
           @change="fetchContainerLogs"
+          class="pagination"
+        />
+      </div>
+
+      <div v-else-if="activeTab === 'login'">
+        <div class="filter-actions">
+          <el-input
+            v-model="loginFilter.keyword"
+            placeholder="关键词（公司名/手机号）"
+            clearable
+            style="width: 220px; margin-right: 10px;"
+          />
+          <el-select
+            v-model="loginFilter.user_id"
+            placeholder="选择用户"
+            clearable
+            filterable
+            style="width: 180px; margin-right: 10px;"
+          >
+            <el-option
+              v-for="user in userList"
+              :key="user.id"
+              :label="`${user.company_name} (${user.phone})`"
+              :value="user.id"
+            />
+          </el-select>
+          <el-select
+            v-if="isSuperAdmin"
+            v-model="loginFilter.admin_id"
+            placeholder="归属管理员"
+            clearable
+            filterable
+            style="width: 160px; margin-right: 10px;"
+          >
+            <el-option
+              v-for="admin in adminList"
+              :key="admin.id"
+              :label="admin.username"
+              :value="admin.id"
+            />
+          </el-select>
+          <el-select
+            v-model="loginFilter.login_status"
+            placeholder="登录结果"
+            clearable
+            style="width: 120px; margin-right: 10px;"
+          >
+            <el-option label="成功" value="success" />
+            <el-option label="失败" value="failed" />
+          </el-select>
+          <el-date-picker
+            v-model="loginFilter.dateRange"
+            type="daterange"
+            range-separator="至"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            value-format="YYYY-MM-DD"
+            style="width: 240px; margin-right: 10px;"
+          />
+          <el-button type="primary" @click="handleLoginQuery">查询</el-button>
+          <el-button @click="handleLoginReset">重置</el-button>
+          <el-button
+            type="success"
+            @click="exportLoginLogs"
+            style="margin-left: auto;"
+          >
+            导出CSV
+          </el-button>
+        </div>
+
+        <el-table :data="loginLogs" v-loading="loginLoading" border>
+          <el-table-column prop="id" label="ID" width="80" />
+          <el-table-column prop="user_name" label="用户/公司" min-width="160" />
+          <el-table-column prop="phone" label="手机号" min-width="130" />
+          <el-table-column prop="admin_name" label="归属管理员" min-width="120" />
+          <el-table-column prop="login_status" label="结果" width="100">
+            <template #default="{ row }">
+              <el-tag :type="getLoginStatusType(row.login_status)" size="small">
+                {{ getLoginStatusText(row.login_status) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column
+            prop="failure_reason"
+            label="失败原因"
+            min-width="160"
+            show-overflow-tooltip
+          >
+            <template #default="{ row }">
+              {{ row.failure_reason || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="ip_address" label="IP地址" width="140">
+            <template #default="{ row }">
+              {{ row.ip_address || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column
+            prop="user_agent"
+            label="客户端信息"
+            min-width="220"
+            show-overflow-tooltip
+          >
+            <template #default="{ row }">
+              {{ row.user_agent || '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="created_at" label="登录时间" width="170">
+            <template #default="{ row }">
+              {{ formatDateTime(row.created_at) }}
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <el-pagination
+          v-model:current-page="loginPagination.page"
+          v-model:page-size="loginPagination.page_size"
+          :total="loginPagination.total"
+          layout="total, sizes, prev, pager, next"
+          @change="fetchLoginLogs"
           class="pagination"
         />
       </div>
@@ -142,7 +277,13 @@
           />
           <el-button type="primary" @click="handleBalanceQuery">查询</el-button>
           <el-button @click="handleBalanceReset">重置</el-button>
-          <el-button type="success" @click="exportBalanceLogs" style="margin-left: auto;">导出CSV</el-button>
+          <el-button
+            type="success"
+            @click="exportBalanceLogs"
+            style="margin-left: auto;"
+          >
+            导出CSV
+          </el-button>
         </div>
 
         <el-table :data="balanceLogs" v-loading="balanceLoading" border>
@@ -155,7 +296,9 @@
           </el-table-column>
           <el-table-column prop="change_type" label="变动类型" width="100">
             <template #default="{ row }">
-              <el-tag :type="getBalanceChangeType(row.change_type)">{{ getBalanceChangeText(row.change_type) }}</el-tag>
+              <el-tag :type="getBalanceChangeType(row.change_type)">
+                {{ getBalanceChangeText(row.change_type) }}
+              </el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="amount" label="变动金额" width="120">
@@ -203,28 +346,48 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getContainerLogs, getBalanceLogs, getUserList, getAdminList } from '@/api/index'
+import {
+  getAdminList,
+  getBalanceLogs,
+  getContainerLogs,
+  getLoginLogs,
+  getUserList,
+} from '@/api/index'
 import { useAdminStore } from '@/stores/admin'
 
 const adminStore = useAdminStore()
 
 const activeTab = ref('container')
-
-const isSuperAdmin = computed(() => adminStore.role === 'super_admin')
+const isSuperAdmin = computed(() => adminStore.isSuperAdmin)
 
 const containerLoading = ref(false)
 const containerLogs = ref([])
 const containerFilter = reactive({
   user_id: '',
   admin_id: '',
-  action: ''
+  action: '',
 })
 const containerPagination = reactive({
   page: 1,
   page_size: 20,
-  total: 0
+  total: 0,
+})
+
+const loginLoading = ref(false)
+const loginLogs = ref([])
+const loginFilter = reactive({
+  keyword: '',
+  user_id: '',
+  admin_id: '',
+  login_status: '',
+  dateRange: [],
+})
+const loginPagination = reactive({
+  page: 1,
+  page_size: 20,
+  total: 0,
 })
 
 const balanceLoading = ref(false)
@@ -232,12 +395,12 @@ const balanceLogs = ref([])
 const balanceFilter = reactive({
   account_type: '',
   change_type: '',
-  dateRange: []
+  dateRange: [],
 })
 const balancePagination = reactive({
   page: 1,
   page_size: 20,
-  total: 0
+  total: 0,
 })
 
 const userList = ref([])
@@ -249,7 +412,7 @@ const getActionType = (action) => {
     start: 'success',
     stop: 'warning',
     delete: 'danger',
-    auto_stop: 'info'
+    auto_stop: 'info',
   }
   return map[action] || 'info'
 }
@@ -260,9 +423,25 @@ const getActionText = (action) => {
     start: '启动',
     stop: '停止',
     delete: '删除',
-    auto_stop: '自动停止'
+    auto_stop: '自动停止',
   }
   return map[action] || action
+}
+
+const getLoginStatusType = (status) => {
+  const map = {
+    success: 'success',
+    failed: 'danger',
+  }
+  return map[status] || 'info'
+}
+
+const getLoginStatusText = (status) => {
+  const map = {
+    success: '成功',
+    failed: '失败',
+  }
+  return map[status] || status
 }
 
 const getBalanceChangeType = (type) => {
@@ -270,7 +449,7 @@ const getBalanceChangeType = (type) => {
     recharge: 'success',
     deduct: 'danger',
     consume: 'warning',
-    refund: 'primary'
+    refund: 'primary',
   }
   return map[type] || 'info'
 }
@@ -280,7 +459,7 @@ const getBalanceChangeText = (type) => {
     recharge: '充值',
     deduct: '扣费',
     consume: '消费',
-    refund: '退款'
+    refund: '退款',
   }
   return map[type] || type
 }
@@ -289,7 +468,7 @@ const getSourceText = (source) => {
   const map = {
     manual: '手动',
     system: '系统',
-    auto: '自动'
+    auto: '自动',
   }
   return map[source] || source || '-'
 }
@@ -303,13 +482,28 @@ const formatDateTime = (datetime) => {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-    second: '2-digit'
+    second: '2-digit',
+  })
+}
+
+const formatDate = (date) => {
+  if (!date) return ''
+  const target = new Date(date)
+  return target.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
   })
 }
 
 const handleTabChange = (tab) => {
   if (tab === 'container' && containerLogs.value.length === 0) {
     fetchContainerLogs()
+  } else if (tab === 'login' && loginLogs.value.length === 0) {
+    fetchLoginLogs()
   } else if (tab === 'balance' && balanceLogs.value.length === 0) {
     fetchBalanceLogs()
   }
@@ -320,7 +514,7 @@ const fetchContainerLogs = async () => {
   try {
     const params = {
       page: containerPagination.page,
-      page_size: containerPagination.page_size
+      page_size: containerPagination.page_size,
     }
     if (containerFilter.user_id) {
       params.user_id = containerFilter.user_id
@@ -344,12 +538,48 @@ const fetchContainerLogs = async () => {
   }
 }
 
+const fetchLoginLogs = async () => {
+  loginLoading.value = true
+  try {
+    const params = {
+      page: loginPagination.page,
+      page_size: loginPagination.page_size,
+    }
+    if (loginFilter.keyword) {
+      params.keyword = loginFilter.keyword
+    }
+    if (loginFilter.user_id) {
+      params.user_id = loginFilter.user_id
+    }
+    if (isSuperAdmin.value && loginFilter.admin_id) {
+      params.admin_id = loginFilter.admin_id
+    }
+    if (loginFilter.login_status) {
+      params.login_status = loginFilter.login_status
+    }
+    if (loginFilter.dateRange && loginFilter.dateRange.length === 2) {
+      params.start_date = loginFilter.dateRange[0]
+      params.end_date = loginFilter.dateRange[1]
+    }
+
+    const res = await getLoginLogs(params)
+    if (res.code === 200) {
+      loginLogs.value = res.data.items
+      loginPagination.total = res.data.total
+    }
+  } catch (error) {
+    ElMessage.error('获取登录日志失败')
+  } finally {
+    loginLoading.value = false
+  }
+}
+
 const fetchBalanceLogs = async () => {
   balanceLoading.value = true
   try {
     const params = {
       page: balancePagination.page,
-      page_size: balancePagination.page_size
+      page_size: balancePagination.page_size,
     }
     if (balanceFilter.account_type) {
       params.account_type = balanceFilter.account_type
@@ -376,8 +606,7 @@ const fetchBalanceLogs = async () => {
 
 const fetchUserList = async () => {
   try {
-    const params = isSuperAdmin.value ? { page: 1, page_size: 1000 } : {}
-    const res = await getUserList(params)
+    const res = await getUserList({ page: 1, page_size: 1000 })
     if (res.code === 200) {
       userList.value = res.data.items || []
     }
@@ -411,6 +640,21 @@ const handleContainerReset = () => {
   fetchContainerLogs()
 }
 
+const handleLoginQuery = () => {
+  loginPagination.page = 1
+  fetchLoginLogs()
+}
+
+const handleLoginReset = () => {
+  loginFilter.keyword = ''
+  loginFilter.user_id = ''
+  loginFilter.admin_id = ''
+  loginFilter.login_status = ''
+  loginFilter.dateRange = []
+  loginPagination.page = 1
+  fetchLoginLogs()
+}
+
 const handleBalanceQuery = () => {
   balancePagination.page = 1
   fetchBalanceLogs()
@@ -424,37 +668,30 @@ const handleBalanceReset = () => {
   fetchBalanceLogs()
 }
 
-const formatDate = (date) => {
-  if (!date) return ''
-  const d = new Date(date)
-  return d.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  })
-}
-
 const downloadCSV = (data, filename) => {
   if (!data || data.length === 0) {
     ElMessage.warning('没有可导出的数据')
     return
   }
+
   const headers = Object.keys(data[0])
   const csvContent = [
     headers.join(','),
-    ...data.map(row => headers.map(h => {
-      const val = row[h]
-      if (val === null || val === undefined) return ''
-      const str = String(val)
-      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-        return `"${str.replace(/"/g, '""')}"`
-      }
-      return str
-    }).join(','))
+    ...data.map((row) =>
+      headers
+        .map((header) => {
+          const val = row[header]
+          if (val === null || val === undefined) return ''
+          const str = String(val)
+          if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+            return `"${str.replace(/"/g, '""')}"`
+          }
+          return str
+        })
+        .join(',')
+    ),
   ].join('\n')
+
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
@@ -467,13 +704,19 @@ const downloadCSV = (data, filename) => {
 const exportContainerLogs = async () => {
   containerLoading.value = true
   try {
-    const params = { page: 1, page_size: containerPagination.total || 10000 }
+    const params = {
+      page: 1,
+      page_size: containerPagination.total || 10000,
+    }
     if (containerFilter.user_id) params.user_id = containerFilter.user_id
-    if (isSuperAdmin.value && containerFilter.admin_id) params.admin_id = containerFilter.admin_id
+    if (isSuperAdmin.value && containerFilter.admin_id) {
+      params.admin_id = containerFilter.admin_id
+    }
     if (containerFilter.action) params.action = containerFilter.action
+
     const res = await getContainerLogs(params)
     if (res.code === 200 && res.data.items) {
-      const exportData = res.data.items.map(item => ({
+      const exportData = res.data.items.map((item) => ({
         ID: item.id,
         用户: item.user_name,
         归属管理员: item.admin_name,
@@ -484,7 +727,7 @@ const exportContainerLogs = async () => {
         使用时长: item.duration_minutes ? `${item.duration_minutes} 分钟` : '-',
         费用: item.cost ? `¥${item.cost.toFixed(2)}` : '-',
         IP地址: item.ip_address || '-',
-        记录时间: formatDate(item.created_at)
+        记录时间: formatDate(item.created_at),
       }))
       downloadCSV(exportData, `容器操作日志_${new Date().toISOString().slice(0, 10)}.csv`)
     }
@@ -495,19 +738,65 @@ const exportContainerLogs = async () => {
   }
 }
 
+const exportLoginLogs = async () => {
+  loginLoading.value = true
+  try {
+    const params = {
+      page: 1,
+      page_size: loginPagination.total || 10000,
+    }
+    if (loginFilter.keyword) params.keyword = loginFilter.keyword
+    if (loginFilter.user_id) params.user_id = loginFilter.user_id
+    if (isSuperAdmin.value && loginFilter.admin_id) {
+      params.admin_id = loginFilter.admin_id
+    }
+    if (loginFilter.login_status) {
+      params.login_status = loginFilter.login_status
+    }
+    if (loginFilter.dateRange && loginFilter.dateRange.length === 2) {
+      params.start_date = loginFilter.dateRange[0]
+      params.end_date = loginFilter.dateRange[1]
+    }
+
+    const res = await getLoginLogs(params)
+    if (res.code === 200 && res.data.items) {
+      const exportData = res.data.items.map((item) => ({
+        ID: item.id,
+        用户: item.user_name,
+        手机号: item.phone,
+        归属管理员: item.admin_name,
+        结果: getLoginStatusText(item.login_status),
+        失败原因: item.failure_reason || '-',
+        IP地址: item.ip_address || '-',
+        客户端信息: item.user_agent || '-',
+        登录时间: formatDate(item.created_at),
+      }))
+      downloadCSV(exportData, `登录日志_${new Date().toISOString().slice(0, 10)}.csv`)
+    }
+  } catch (error) {
+    ElMessage.error('导出失败')
+  } finally {
+    loginLoading.value = false
+  }
+}
+
 const exportBalanceLogs = async () => {
   balanceLoading.value = true
   try {
-    const params = { page: 1, page_size: balancePagination.total || 10000 }
+    const params = {
+      page: 1,
+      page_size: balancePagination.total || 10000,
+    }
     if (balanceFilter.account_type) params.account_type = balanceFilter.account_type
     if (balanceFilter.change_type) params.change_type = balanceFilter.change_type
     if (balanceFilter.dateRange && balanceFilter.dateRange.length === 2) {
       params.start_date = balanceFilter.dateRange[0]
       params.end_date = balanceFilter.dateRange[1]
     }
+
     const res = await getBalanceLogs(params)
     if (res.code === 200 && res.data.items) {
-      const exportData = res.data.items.map(item => ({
+      const exportData = res.data.items.map((item) => ({
         ID: item.id,
         账户名称: item.account_name,
         账户类型: item.account_type === 'admin' ? '管理员' : '用户',
@@ -518,7 +807,7 @@ const exportBalanceLogs = async () => {
         来源: getSourceText(item.source),
         操作人: item.operator_name || '-',
         备注: item.remark || '-',
-        时间: formatDate(item.created_at)
+        时间: formatDate(item.created_at),
       }))
       downloadCSV(exportData, `余额变动日志_${new Date().toISOString().slice(0, 10)}.csv`)
     }
@@ -549,6 +838,8 @@ onMounted(() => {
   display: flex;
   align-items: center;
   margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 10px 0;
 }
 
 .pagination {
@@ -557,17 +848,17 @@ onMounted(() => {
 }
 
 .cost-value {
-  color: #F56C6C;
+  color: #f56c6c;
   font-weight: bold;
 }
 
 .income-value {
-  color: #67C23A;
+  color: #67c23a;
   font-weight: bold;
 }
 
 .expense-value {
-  color: #F56C6C;
+  color: #f56c6c;
   font-weight: bold;
 }
 </style>

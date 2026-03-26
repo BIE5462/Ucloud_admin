@@ -22,33 +22,21 @@ class UCloudService:
     async def create_container(
         self,
         instance_name: str,
+        create_config: dict,
     ) -> dict:
         """创建容器实例
 
-        默认参数固定，仅实例名称可自定义。
+        创建参数从系统后台配置读取，仅部分底层参数保持固定。
         参考 Ucloud_SDK_example.py 中的创建方式。
         """
         try:
-            # 创建容器实例 - 使用固定默认参数
+            # 创建容器实例 - 核心规格来自系统配置
+            create_payload = self.build_create_payload(
+                instance_name=instance_name,
+                create_config=create_config,
+            )
             create_resp = self.client.ucompshare().create_comp_share_instance(
-                {
-                    "Zone": "cn-wlcb-01",  # 总是cn-wlcb-01
-                    "MachineType": "G",  # 总是G
-                    "CompShareImageId": "compshareImage-1mnqn08rd1xz",  # 使用的镜像ID
-                    "GPU": 1,  # GPU数量
-                    "GpuType": "3080Ti",  # GPU类型
-                    "CPU": 12,  # CPU核心数
-                    "Memory": 32768,  # 内存大小
-                    "ChargeType": "Postpay",
-                    "Disks": [
-                        {
-                            "IsBoot": True,
-                            "Size": 200,  # 系统盘大小，200表示200G
-                            "Type": "CLOUD_SSD",
-                        }
-                    ],
-                    "Name": instance_name,
-                }
+                create_payload
             )
 
             # 获取新创建的实例ID
@@ -77,6 +65,28 @@ class UCloudService:
 
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    @staticmethod
+    def build_create_payload(instance_name: str, create_config: dict) -> dict:
+        """构建创建容器实例的请求参数"""
+        return {
+            "Zone": "cn-wlcb-01",
+            "MachineType": "G",
+            "CompShareImageId": create_config["comp_share_image_id"],
+            "GPU": 1,
+            "GpuType": create_config["gpu_type"],
+            "CPU": create_config["cpu_cores"],
+            "Memory": create_config["memory_gb"] * 1024,
+            "ChargeType": "Postpay",
+            "Disks": [
+                {
+                    "IsBoot": True,
+                    "Size": 200,
+                    "Type": "CLOUD_SSD",
+                }
+            ],
+            "Name": instance_name,
+        }
 
     async def start_container(self, instance_id: str) -> dict:
         """启动容器实例"""

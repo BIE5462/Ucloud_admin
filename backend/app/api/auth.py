@@ -1,22 +1,28 @@
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
 
 from app.db.database import get_db
 from app.core.security import (
     verify_password,
     create_access_token,
     decode_token,
-    get_password_hash,
 )
-from app.schemas.schemas import UserLogin, AdminLogin, ResponseData, UserInfo, AdminInfo
-from app.services.crud_service import user_service, admin_service
+from app.schemas.schemas import UserLogin, AdminLogin, ResponseData
+from app.services.crud_service import user_service, admin_service, log_service
 from app.models.models import User, Admin
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 security = HTTPBearer()
+
+
+def get_request_ip(request: Request) -> Optional[str]:
+    """获取请求IP地址"""
+    if request.client:
+        return request.client.host
+    return None
 
 
 async def get_current_user(
@@ -92,19 +98,65 @@ async def user_login(
 ):
     """用户登录"""
     user = await user_service.get_by_phone(db, login_data.phone)
+    ip_address = get_request_ip(request)
+    user_agent = request.headers.get("user-agent")
 
-    if not user or not verify_password(login_data.password, user.password_hash):
+    if not user:
+        await log_service.create_user_login_log(
+            db,
+            phone=login_data.phone,
+            login_status="failed",
+            failure_reason="手机号或密码错误",
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="手机号或密码错误"
+        )
+
+    if not verify_password(login_data.password, user.password_hash):
+        await log_service.create_user_login_log(
+            db,
+            phone=login_data.phone,
+            login_status="failed",
+            user_id=user.id,
+            admin_id=user.admin_id,
+            failure_reason="手机号或密码错误",
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="手机号或密码错误"
         )
 
     if user.status != 1:
+        await log_service.create_user_login_log(
+            db,
+            phone=login_data.phone,
+            login_status="failed",
+            user_id=user.id,
+            admin_id=user.admin_id,
+            failure_reason="账号已被禁用",
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="账号已被禁用"
         )
 
     # 更新最后登录时间
     user.last_login_at = datetime.utcnow()
+
+    await log_service.create_user_login_log(
+        db,
+        phone=user.phone,
+        login_status="success",
+        user_id=user.id,
+        admin_id=user.admin_id,
+        ip_address=ip_address,
+        user_agent=user_agent,
+        auto_commit=False,
+    )
     await db.commit()
 
     # 生成Token
@@ -150,7 +202,7 @@ async def admin_login(
 
     # 更新最后登录时间
     admin.last_login_at = datetime.utcnow()
-    admin.last_login_ip = request.client.host
+    admin.last_login_ip = get_request_ip(request)
     await db.commit()
 
     # 生成Token

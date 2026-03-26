@@ -6,7 +6,6 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Text,
-    Boolean,
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -182,6 +181,30 @@ class AdminOperationLog(Base):
     description = Column(Text, nullable=True)
     ip_address = Column(String(50), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserLoginLog(Base):
+    """用户登录日志表"""
+
+    __tablename__ = "user_login_log"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    user_id = Column(
+        Integer, ForeignKey("m_user.id"), nullable=True, index=True, comment="用户ID"
+    )
+    admin_id = Column(
+        Integer, ForeignKey("m_admin.id"), nullable=True, index=True, comment="归属管理员ID"
+    )
+    phone = Column(String(20), nullable=False, index=True, comment="登录手机号")
+    login_status = Column(
+        String(20), nullable=False, index=True, comment="登录结果: success/failed"
+    )
+    failure_reason = Column(String(255), nullable=True, comment="失败原因")
+    ip_address = Column(String(50), nullable=True, comment="登录IP")
+    user_agent = Column(Text, nullable=True, comment="客户端标识")
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
 
 
 class BalanceLog(Base):

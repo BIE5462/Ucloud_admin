@@ -1,5 +1,5 @@
-import requests
 import json
+import requests
 
 BASE_URL = "http://localhost:8000"
 
@@ -43,16 +43,92 @@ def test_admin_login():
 
         if data.get("code") == 200:
             print(f"✅ 登录成功!")
-            print(f"Token: {data.get('data', {}).get('token', 'N/A')}")
+            token = data.get("data", {}).get("token")
+            print(f"Token: {token or 'N/A'}")
             print(f"管理员: {data.get('data', {}).get('admin', {})}")
-            return True
+            return token
         else:
             print(f"[失败] 登录失败: {data.get('message')}")
-            return False
+            return None
 
     except requests.exceptions.ConnectionError:
         print(f"❌ 连接失败: 无法连接到 {BASE_URL}")
         print("   请确保后端服务已启动: python backend/run.py")
+        return None
+    except Exception as e:
+        print(f"[错误] {e}")
+        return None
+
+
+def test_get_system_config(token):
+    """测试获取系统配置"""
+    print("\n" + "=" * 50)
+    print("测试3: 获取系统配置")
+    print("=" * 50)
+    print(f"请求URL: {BASE_URL}/api/admin/config")
+
+    try:
+        resp = requests.get(
+            f"{BASE_URL}/api/admin/config",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+
+        print(f"\n状态码: {resp.status_code}")
+        data = resp.json()
+        print(f"响应码: {data.get('code')}")
+        print(f"消息: {data.get('message')}")
+
+        if data.get("code") == 200:
+            config = data.get("data", {})
+            print("✅ 获取系统配置成功!")
+            print(f"配置详情: {json.dumps(config, ensure_ascii=False, indent=2)}")
+            return config
+
+        print(f"[失败] 获取系统配置失败: {data.get('message')}")
+        return None
+    except Exception as e:
+        print(f"[错误] {e}")
+        return None
+
+
+def test_update_system_config(token, config):
+    """测试更新系统配置（使用当前值回写，避免引入额外变更）"""
+    print("\n" + "=" * 50)
+    print("测试4: 更新系统配置")
+    print("=" * 50)
+    print(f"请求URL: {BASE_URL}/api/admin/config")
+    print(f"请求数据: {json.dumps(config, ensure_ascii=False)}")
+
+    try:
+        resp = requests.put(
+            f"{BASE_URL}/api/admin/config",
+            json={
+                "price_per_minute": config.get("price_per_minute"),
+                "min_balance_to_start": config.get("min_balance_to_start"),
+                "comp_share_image_id": config.get("comp_share_image_id"),
+                "gpu_type": config.get("gpu_type"),
+                "cpu_cores": config.get("cpu_cores"),
+                "memory_gb": config.get("memory_gb"),
+            },
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+            },
+            timeout=10,
+        )
+
+        print(f"\n状态码: {resp.status_code}")
+        data = resp.json()
+        print(f"响应码: {data.get('code')}")
+        print(f"消息: {data.get('message')}")
+
+        if data.get("code") == 200:
+            print("✅ 系统配置更新成功!")
+            print(f"响应数据: {json.dumps(data.get('data', {}), ensure_ascii=False)}")
+            return True
+
+        print(f"[失败] 更新系统配置失败: {data.get('message')}")
         return False
     except Exception as e:
         print(f"[错误] {e}")
@@ -62,7 +138,7 @@ def test_admin_login():
 def test_user_login():
     """测试用户登录"""
     print("\n" + "=" * 50)
-    print("测试3: 用户登录")
+    print("测试5: 用户登录")
     print("=" * 50)
     print(f"请求URL: {BASE_URL}/api/auth/login")
     print(f"请求数据: {{'phone': '13800138000', 'password': '13800138000'}}")
@@ -96,6 +172,43 @@ def test_user_login():
         return False
 
 
+def test_get_login_logs(token):
+    """测试获取登录日志"""
+    print("\n" + "=" * 50)
+    print("测试6: 获取登录日志")
+    print("=" * 50)
+    print(f"请求URL: {BASE_URL}/api/admin/logs/login")
+
+    try:
+        resp = requests.get(
+            f"{BASE_URL}/api/admin/logs/login",
+            params={"page": 1, "page_size": 10},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+
+        print(f"\n状态码: {resp.status_code}")
+        data = resp.json()
+        print(f"响应码: {data.get('code')}")
+        print(f"消息: {data.get('message')}")
+
+        if data.get("code") == 200:
+            items = data.get("data", {}).get("items", [])
+            print("✅ 获取登录日志成功!")
+            print(f"日志条数: {len(items)}")
+            if items:
+                print(
+                    f"最新日志: {json.dumps(items[0], ensure_ascii=False, indent=2)}"
+                )
+            return True
+
+        print(f"[失败] 获取登录日志失败: {data.get('message')}")
+        return False
+    except Exception as e:
+        print(f"[错误] {e}")
+        return False
+
+
 def main():
     print("\n云电脑管理系统 - API测试工具")
     print("=" * 50)
@@ -107,10 +220,18 @@ def main():
         return
 
     # 测试管理员登录
-    test_admin_login()
+    admin_token = test_admin_login()
+    if admin_token:
+        current_config = test_get_system_config(admin_token)
+        if current_config:
+            test_update_system_config(admin_token, current_config)
 
     # 测试用户登录
     test_user_login()
+
+    # 测试登录日志
+    if admin_token:
+        test_get_login_logs(admin_token)
 
     print("\n" + "=" * 50)
     print("测试完成!")

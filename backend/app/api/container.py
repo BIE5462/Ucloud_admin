@@ -172,9 +172,13 @@ async def create_container(
     # 获取当前价格
     price_per_minute = await config_service.get_price_per_minute(db)
 
-    # 调用UCloud创建实例 - 使用固定默认参数，仅实例名称可自定义
+    # 获取当前容器创建配置
+    container_create_config = await config_service.get_container_create_config(db)
+
+    # 调用UCloud创建实例 - 规格参数统一来自系统配置
     result = await ucloud_service.create_container(
         instance_name=container_data.instance_name,
+        create_config=container_create_config,
     )
 
     if not result["success"]:
@@ -183,16 +187,16 @@ async def create_container(
             detail=f"创建失败: {result.get('error', '未知错误')}",
         )
 
-    # 创建容器记录 - 使用固定默认参数
+    # 创建容器记录 - 保存本次实际生效的系统配置快照
     container = await container_service.create(
         db,
         current_user.id,
         {
             "instance_id": result["instance_id"],
             "instance_name": container_data.instance_name,
-            "gpu_type": "3080Ti",
-            "cpu_cores": 12,
-            "memory_gb": 32,
+            "gpu_type": container_create_config["gpu_type"],
+            "cpu_cores": container_create_config["cpu_cores"],
+            "memory_gb": container_create_config["memory_gb"],
             "storage_gb": 200,
             "ip": result["ip"],
             "password": result["password"],

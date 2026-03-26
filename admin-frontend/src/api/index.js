@@ -197,12 +197,18 @@ export const rechargeAdminBalance = (id, data) =>
 export const getConfig = () => 
   api.get('/admin/config')
 
+export const updateConfig = (data) =>
+  api.put('/admin/config', data)
+
 export const updatePrice = (data) => 
   api.put('/admin/config/price', data)
 
 // 日志管理
 export const getContainerLogs = (params) =>
   api.get('/admin/logs/container', { params })
+
+export const getLoginLogs = (params) =>
+  api.get('/admin/logs/login', { params })
 
 export const getBalanceLogs = (params) =>
   api.get('/admin/balance-logs', { params })

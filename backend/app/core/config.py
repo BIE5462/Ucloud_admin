@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     UCLOUD_PUBLIC_KEY: str = "4eZCt9GH5fS1XEutXeyTtv6A0QReFzqW5"
     UCLOUD_PRIVATE_KEY: str = "9W5iDOdYn7cJxUaEgsYhMVCvhYR71fraGHpkmmJjuWmU"
     UCLOUD_IMAGE_ID: str = "compshareImage-1mnqn08rd1xz"
+    DEFAULT_COMP_SHARE_IMAGE_ID: str = "compshareImage-1mnqn08rd1xz"
+    DEFAULT_GPU_TYPE: str = "3080Ti"
+    DEFAULT_CPU_CORES: int = 12
+    DEFAULT_MEMORY_GB: int = 32
 
     # 默认价格配置
     DEFAULT_PRICE_PER_MINUTE: float = 0.5

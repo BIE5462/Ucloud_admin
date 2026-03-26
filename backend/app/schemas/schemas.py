@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
+from typing import List, Optional
+
+from pydantic import BaseModel, Field, field_validator
 
 
 # ==================== 响应基类 ====================
@@ -110,12 +111,16 @@ class AdminInfo(BaseModel):
 
 # ==================== 容器相关 ====================
 class ContainerCreate(BaseModel):
-    gpu_type: str = "V100"
-    cpu_cores: int = 8
-    memory_gb: int = 32
-    storage_gb: int = 100
-    instance_name: str
+    instance_name: str = Field(min_length=1)
     force: bool = False  # 强制创建，删除已有实例
+
+    @field_validator("instance_name")
+    @classmethod
+    def validate_instance_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("实例名称不能为空")
+        return value
 
 
 class ContainerInfo(BaseModel):
@@ -162,13 +167,30 @@ class ContainerDeleteRequest(BaseModel):
 
 # ==================== 系统配置相关 ====================
 class SystemConfigUpdate(BaseModel):
-    price_per_minute: float
+    price_per_minute: float = Field(gt=0)
+    min_balance_to_start: float = Field(ge=0)
+    comp_share_image_id: str = Field(min_length=1)
+    gpu_type: str = Field(min_length=1)
+    cpu_cores: int = Field(gt=0)
+    memory_gb: int = Field(gt=0)
+
+    @field_validator("comp_share_image_id", "gpu_type")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("配置项不能为空")
+        return value
 
 
 class SystemConfigInfo(BaseModel):
     price_per_minute: float
     min_balance_to_start: float
     auto_stop_threshold: float = 0.0
+    comp_share_image_id: str
+    gpu_type: str
+    cpu_cores: int
+    memory_gb: int
 
 
 # ==================== 扣费记录相关 ====================

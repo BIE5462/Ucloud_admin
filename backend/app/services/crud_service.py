@@ -11,6 +11,7 @@ from app.models.models import (
     SystemConfig,
     ContainerLog,
     AdminOperationLog,
+    UserLoginLog,
 )
 from app.core.security import get_password_hash
 from app.core.config import get_settings
@@ -356,6 +357,22 @@ class ContainerService:
 class ConfigService:
     """配置服务"""
 
+    CONFIG_DESCRIPTIONS = {
+        "price_per_minute": "云电脑每分钟价格（元）",
+        "min_balance_to_start": "启动云电脑所需的最低余额（元）",
+        "comp_share_image_id": "创建云电脑实例使用的镜像ID",
+        "gpu_type": "创建云电脑实例使用的GPU类型",
+        "cpu_cores": "创建云电脑实例使用的CPU核数",
+        "memory_gb": "创建云电脑实例使用的内存大小（GB）",
+        "auto_stop_threshold": "自动关机余额阈值（元）",
+    }
+    CONTAINER_CREATE_CONFIG_KEYS = (
+        "comp_share_image_id",
+        "gpu_type",
+        "cpu_cores",
+        "memory_gb",
+    )
+
     @staticmethod
     async def get_config(db: AsyncSession, key: str) -> Optional[SystemConfig]:
         """获取配置项"""
@@ -363,6 +380,33 @@ class ConfigService:
             select(SystemConfig).where(SystemConfig.config_key == key)
         )
         return result.scalar_one_or_none()
+
+    @staticmethod
+    async def _upsert_config(
+        db: AsyncSession,
+        key: str,
+        value: str,
+        description: str = None,
+        updated_by: int = None,
+    ) -> None:
+        """新增或更新配置项（不提交事务）"""
+        config = await ConfigService.get_config(db, key)
+
+        if config:
+            config.config_value = value
+            if description:
+                config.description = description
+            config.updated_by = updated_by
+            return
+
+        db.add(
+            SystemConfig(
+                config_key=key,
+                config_value=value,
+                description=description,
+                updated_by=updated_by,
+            )
+        )
 
     @staticmethod
     async def set_config(
@@ -373,30 +417,97 @@ class ConfigService:
         updated_by: int = None,
     ):
         """设置配置项"""
-        config = await ConfigService.get_config(db, key)
+        await ConfigService._upsert_config(
+            db,
+            key,
+            str(value),
+            description=description or ConfigService.CONFIG_DESCRIPTIONS.get(key),
+            updated_by=updated_by,
+        )
+        await db.commit()
 
-        if config:
-            config.config_value = value
-            if description:
-                config.description = description
-            config.updated_by = updated_by
-        else:
-            config = SystemConfig(
-                config_key=key,
-                config_value=value,
-                description=description,
+    @staticmethod
+    async def set_configs(
+        db: AsyncSession,
+        config_data: dict,
+        updated_by: int = None,
+    ) -> None:
+        """批量设置配置项"""
+        for key, value in config_data.items():
+            await ConfigService._upsert_config(
+                db,
+                key,
+                str(value),
+                description=ConfigService.CONFIG_DESCRIPTIONS.get(key),
                 updated_by=updated_by,
             )
-            db.add(config)
-
         await db.commit()
+
+    @staticmethod
+    def _parse_float_value(value, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _parse_int_value(value, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _parse_text_value(value, default: str) -> str:
+        if value is None:
+            return default
+
+        text = str(value).strip()
+        return text or default
+
+    @staticmethod
+    def normalize_configs(config_dict: dict) -> dict:
+        """合并默认值并转换为可直接使用的配置"""
+        return {
+            "price_per_minute": ConfigService._parse_float_value(
+                config_dict.get("price_per_minute"),
+                settings.DEFAULT_PRICE_PER_MINUTE,
+            ),
+            "min_balance_to_start": ConfigService._parse_float_value(
+                config_dict.get("min_balance_to_start"),
+                settings.DEFAULT_MIN_BALANCE_TO_START,
+            ),
+            "auto_stop_threshold": ConfigService._parse_float_value(
+                config_dict.get("auto_stop_threshold"),
+                0.0,
+            ),
+            "comp_share_image_id": ConfigService._parse_text_value(
+                config_dict.get("comp_share_image_id"),
+                settings.DEFAULT_COMP_SHARE_IMAGE_ID,
+            ),
+            "gpu_type": ConfigService._parse_text_value(
+                config_dict.get("gpu_type"),
+                settings.DEFAULT_GPU_TYPE,
+            ),
+            "cpu_cores": ConfigService._parse_int_value(
+                config_dict.get("cpu_cores"),
+                settings.DEFAULT_CPU_CORES,
+            ),
+            "memory_gb": ConfigService._parse_int_value(
+                config_dict.get("memory_gb"),
+                settings.DEFAULT_MEMORY_GB,
+            ),
+        }
 
     @staticmethod
     async def get_price_per_minute(db: AsyncSession) -> float:
         """获取每分钟价格"""
         config = await ConfigService.get_config(db, "price_per_minute")
         if config:
-            return float(config.config_value)
+            return ConfigService._parse_float_value(
+                config.config_value,
+                settings.DEFAULT_PRICE_PER_MINUTE,
+            )
         return settings.DEFAULT_PRICE_PER_MINUTE
 
     @staticmethod
@@ -404,7 +515,10 @@ class ConfigService:
         """获取启动所需最低余额"""
         config = await ConfigService.get_config(db, "min_balance_to_start")
         if config:
-            return float(config.config_value)
+            return ConfigService._parse_float_value(
+                config.config_value,
+                settings.DEFAULT_MIN_BALANCE_TO_START,
+            )
         return settings.DEFAULT_MIN_BALANCE_TO_START
 
     @staticmethod
@@ -417,15 +531,16 @@ class ConfigService:
         for config in configs:
             config_dict[config.config_key] = config.config_value
 
-        # 设置默认值
-        if "price_per_minute" not in config_dict:
-            config_dict["price_per_minute"] = settings.DEFAULT_PRICE_PER_MINUTE
-        if "min_balance_to_start" not in config_dict:
-            config_dict["min_balance_to_start"] = settings.DEFAULT_MIN_BALANCE_TO_START
-        if "auto_stop_threshold" not in config_dict:
-            config_dict["auto_stop_threshold"] = "0.0"
+        return ConfigService.normalize_configs(config_dict)
 
-        return config_dict
+    @staticmethod
+    async def get_container_create_config(db: AsyncSession) -> dict:
+        """获取创建容器实例所需的配置"""
+        configs = await ConfigService.get_all_configs(db)
+        return {
+            key: configs[key]
+            for key in ConfigService.CONTAINER_CREATE_CONFIG_KEYS
+        }
 
 
 class LogService:
@@ -492,6 +607,32 @@ class LogService:
         )
         db.add(log)
         await db.commit()
+
+    @staticmethod
+    async def create_user_login_log(
+        db: AsyncSession,
+        phone: str,
+        login_status: str,
+        user_id: int = None,
+        admin_id: int = None,
+        failure_reason: str = None,
+        ip_address: str = None,
+        user_agent: str = None,
+        auto_commit: bool = True,
+    ):
+        """创建用户登录日志"""
+        log = UserLoginLog(
+            user_id=user_id,
+            admin_id=admin_id,
+            phone=phone,
+            login_status=login_status,
+            failure_reason=failure_reason,
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        db.add(log)
+        if auto_commit:
+            await db.commit()
 
 
 # 导出服务
