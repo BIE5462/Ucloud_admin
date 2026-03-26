@@ -201,7 +201,11 @@ class APIClient:
                 response=detail,
             )
         elif response.status_code >= 400:
-            message = data.get("message", f"请求错误 (HTTP {response.status_code})")
+            message = data.get("message")
+            if not message and isinstance(detail, dict):
+                message = detail.get("message")
+            if not message:
+                message = f"请求错误 (HTTP {response.status_code})"
             raise APIError(
                 message,
                 code=response.status_code,
@@ -378,11 +382,45 @@ class APIClient:
                 exception=e,
             )
 
-    def create_container(self, instance_name: str) -> APIResult:
+    def get_container_config_options(self) -> APIResult:
+        """获取用户可选套餐列表"""
+        try:
+            data = self._request("GET", "/container/config-options")
+            return self._make_api_result(
+                success=True, data=data.get("data"), message="获取成功"
+            )
+        except APIError as e:
+            return self._make_api_result(
+                success=False,
+                message=e.message,
+                code=e.code,
+                request_id=e.request_id,
+                error_type=e.error_type,
+                error_detail=e.response,
+                exception=e,
+            )
+        except Exception as e:
+            return self._make_api_result(
+                success=False,
+                message=f"获取失败: {str(e)}",
+                code=500,
+                error_type="exception",
+                exception=e,
+            )
+
+    def create_container(
+        self, instance_name: str, config_code: str, force: bool = False
+    ) -> APIResult:
         """创建云电脑"""
         try:
             data = self._request(
-                "POST", "/container", json={"instance_name": instance_name}
+                "POST",
+                "/container",
+                json={
+                    "instance_name": instance_name,
+                    "config_code": config_code,
+                    "force": force,
+                },
             )
             return self._make_api_result(
                 success=True, data=data.get("data"), message="创建成功"

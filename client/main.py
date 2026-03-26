@@ -26,9 +26,11 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QGroupBox,
     QGridLayout,
+    QButtonGroup,
     QSpinBox,
     QComboBox,
     QDialog,
+    QRadioButton,
     QTextEdit,
     QTabWidget,
 )
@@ -206,57 +208,49 @@ class CreateContainerDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.config_options = []
+        self.config_option_group = QButtonGroup(self)
+        self.config_option_group.setExclusive(True)
         self.setWindowTitle("创建云电脑")
-        self.setFixedSize(400, 300)
+        self.setFixedSize(560, 460)
         self.setup_ui()
+        self.load_config_options()
 
     def setup_ui(self):
         layout = QVBoxLayout()
         layout.setContentsMargins(30, 20, 30, 20)
+        layout.setSpacing(16)
 
-        # 配置信息（固定参数，仅展示）
-        config_group = QGroupBox("配置信息")
-        config_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                font-size: 14px;
-                border: 1px solid #DCDFE6;
+        # 套餐选择
+        config_group = QGroupBox("选择套餐")
+        config_group.setStyleSheet(
+            """
+QGroupBox {
+    font-weight: bold;
+    font-size: 14px;
+    border: 1px solid #DCDFE6;
                 border-radius: 6px;
                 margin-top: 10px;
                 padding-top: 15px;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-        """)
-        config_layout = QGridLayout()
-        config_layout.setSpacing(15)
-
-        # 显示固定配置
-        config_layout.addWidget(QLabel("GPU:"), 0, 0)
-        gpu_label = QLabel("NVIDIA 3080Ti x 1")
-        gpu_label.setStyleSheet("color: #606266;")
-        config_layout.addWidget(gpu_label, 0, 1)
-
-        config_layout.addWidget(QLabel("CPU:"), 1, 0)
-        cpu_label = QLabel("12 核")
-        cpu_label.setStyleSheet("color: #606266;")
-        config_layout.addWidget(cpu_label, 1, 1)
-
-        config_layout.addWidget(QLabel("内存:"), 2, 0)
-        memory_label = QLabel("32 GB")
-        memory_label.setStyleSheet("color: #606266;")
-        config_layout.addWidget(memory_label, 2, 1)
-
-        config_layout.addWidget(QLabel("存储:"), 3, 0)
-        storage_label = QLabel("200 GB SSD")
-        storage_label.setStyleSheet("color: #606266;")
-        config_layout.addWidget(storage_label, 3, 1)
-
-        config_group.setLayout(config_layout)
+    left: 10px;
+    padding: 0 5px;
+}
+"""
+        )
+        self.config_layout = QVBoxLayout()
+        self.config_layout.setSpacing(8)
+        self.config_status_label = QLabel("正在加载套餐信息...")
+        self.config_status_label.setStyleSheet("color: #909399;")
+        self.config_layout.addWidget(self.config_status_label)
+        config_group.setLayout(self.config_layout)
         layout.addWidget(config_group)
+
+        self.balance_tip_label = QLabel("创建/启动最低余额: --")
+        self.balance_tip_label.setStyleSheet("color: #E6A23C; font-size: 12px;")
+        layout.addWidget(self.balance_tip_label)
 
         # 实例名称
         name_layout = QHBoxLayout()
@@ -281,26 +275,30 @@ class CreateContainerDialog(QDialog):
                 border-radius: 4px;
                 border: none;
             }
-            QPushButton:hover {
-                background-color: #85ce61;
-            }
-        """)
+QPushButton:hover {
+    background-color: #85ce61;
+}
+"""
+        )
         self.create_btn.clicked.connect(self.accept)
+        self.create_btn.setEnabled(False)
 
         cancel_btn = QPushButton("取 消")
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #909399;
-                color: white;
+        cancel_btn.setStyleSheet(
+            """
+QPushButton {
+    background-color: #909399;
+    color: white;
                 padding: 12px 40px;
                 font-size: 14px;
                 border-radius: 4px;
                 border: none;
             }
-            QPushButton:hover {
-                background-color: #a6a9ad;
-            }
-        """)
+QPushButton:hover {
+    background-color: #a6a9ad;
+}
+"""
+        )
         cancel_btn.clicked.connect(self.reject)
 
         btn_layout.addStretch()
@@ -312,6 +310,83 @@ class CreateContainerDialog(QDialog):
         layout.addStretch()
 
         self.setLayout(layout)
+
+    def load_config_options(self):
+        """加载用户可选套餐"""
+        for button in self.config_option_group.buttons():
+            self.config_option_group.removeButton(button)
+
+        while self.config_layout.count():
+            item = self.config_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        result = api_client.get_container_config_options()
+        if not result.is_ok():
+            error_label = QLabel(f"套餐信息加载失败：{result.message or '请稍后重试'}")
+            error_label.setStyleSheet("color: #F56C6C;")
+            error_label.setWordWrap(True)
+            self.config_layout.addWidget(error_label)
+            self.balance_tip_label.setText("创建/启动最低余额: --")
+            self.create_btn.setEnabled(False)
+            return
+
+        data = result.data or {}
+        self.config_options = data.get("config_options", [])
+        min_balance = float(data.get("min_balance_to_start", 0))
+        self.balance_tip_label.setText(
+            f"创建/启动最低余额: ¥{min_balance:.2f}"
+        )
+
+        if not self.config_options:
+            empty_label = QLabel("当前没有可用套餐，请联系管理员。")
+            empty_label.setStyleSheet("color: #F56C6C;")
+            self.config_layout.addWidget(empty_label)
+            self.create_btn.setEnabled(False)
+            return
+
+        for index, option in enumerate(self.config_options):
+            radio = QRadioButton(self.format_option_text(option))
+            radio.config_code = option.get("config_code")
+            radio.setStyleSheet(
+                """
+QRadioButton {
+    padding: 8px 10px;
+    border: 1px solid #EBEEF5;
+    border-radius: 6px;
+    color: #303133;
+}
+QRadioButton:hover {
+    background-color: #F5F7FA;
+}
+"""
+            )
+            radio.setChecked(index == 0)
+            self.config_option_group.addButton(radio, index)
+            self.config_layout.addWidget(radio)
+
+        self.create_btn.setEnabled(True)
+
+    @staticmethod
+    def format_option_text(option):
+        """格式化套餐显示文本"""
+        price = float(option.get("price_per_minute", 0))
+        return (
+            f"{option.get('config_name', '-')}"
+            f" | {option.get('gpu_type', '-')}"
+            f" | {option.get('cpu_cores', 0)}核CPU"
+            f" | {option.get('memory_gb', 0)}GB内存"
+            f" | {option.get('storage_gb', 0)}GB存储"
+            f" | ¥{price:.2f}/分钟"
+        )
+
+    def get_selected_config_code(self):
+        """获取当前选中的套餐编码"""
+        checked_button = self.config_option_group.checkedButton()
+        if not checked_button:
+            return None
+        return getattr(checked_button, "config_code", None)
 
 
 class MainWindow(QMainWindow):
@@ -712,12 +787,22 @@ class MainWindow(QMainWindow):
         self.status_label.setStyleSheet(f"color: {color};")
 
         # 配置
-        self.config_label.setText(
-            f"配置: {container.get('gpu_type', '-')}, "
-            f"{container.get('cpu_cores', 0)}核CPU, "
-            f"{container.get('memory_gb', 0)}GB内存, "
-            f"{container.get('storage_gb', 0)}GB存储"
-        )
+        config_name = container.get("config_name")
+        if config_name:
+            self.config_label.setText(
+                f"套餐: {config_name} | "
+                f"{container.get('gpu_type', '-')}, "
+                f"{container.get('cpu_cores', 0)}核CPU, "
+                f"{container.get('memory_gb', 0)}GB内存, "
+                f"{container.get('storage_gb', 0)}GB存储"
+            )
+        else:
+            self.config_label.setText(
+                f"配置: {container.get('gpu_type', '-')}, "
+                f"{container.get('cpu_cores', 0)}核CPU, "
+                f"{container.get('memory_gb', 0)}GB内存, "
+                f"{container.get('storage_gb', 0)}GB存储"
+            )
 
         # 按钮状态
         is_running = status_text == "running"
@@ -785,14 +870,59 @@ class MainWindow(QMainWindow):
         dialog = CreateContainerDialog(self)
         if dialog.exec() == QDialog.Accepted:
             name = dialog.name_input.text().strip() or "我的云电脑"
+            config_code = dialog.get_selected_config_code()
 
-            result = api_client.create_container(instance_name=name)
+            if not config_code:
+                QMessageBox.warning(self, "提示", "请选择一个套餐后再创建")
+                return
+
+            result = api_client.create_container(
+                instance_name=name,
+                config_code=config_code,
+            )
 
             if result.is_ok():
                 QMessageBox.information(self, "成功", "云电脑创建成功！")
                 self.refresh_container()
-            else:
-                QMessageBox.critical(self, "失败", result.get_error_display())
+                return
+
+            error_detail = (
+                result.error_detail if isinstance(result.error_detail, dict) else {}
+            )
+            if result.code == 409 and error_detail.get("require_confirm"):
+                existing_container = error_detail.get("existing_container", {})
+                existing_name = existing_container.get("instance_name", "旧实例")
+                existing_status = existing_container.get("status", "-")
+                existing_gpu = existing_container.get("gpu_type", "-")
+                reply = QMessageBox.question(
+                    self,
+                    "确认替换实例",
+                    "您已有一个云电脑实例。\n"
+                    f"当前实例: {existing_name}\n"
+                    f"状态: {existing_status}\n"
+                    f"GPU: {existing_gpu}\n\n"
+                    "是否删除旧实例并按所选套餐创建新实例？",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if reply == QMessageBox.Yes:
+                    force_result = api_client.create_container(
+                        instance_name=name,
+                        config_code=config_code,
+                        force=True,
+                    )
+                    if force_result.is_ok():
+                        QMessageBox.information(self, "成功", "云电脑创建成功！")
+                        self.refresh_container()
+                    else:
+                        QMessageBox.critical(
+                            self,
+                            "失败",
+                            force_result.get_error_display(),
+                        )
+                return
+
+            QMessageBox.critical(self, "失败", result.get_error_display())
 
     def start_container(self):
         """启动云电脑"""
