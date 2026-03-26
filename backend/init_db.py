@@ -5,7 +5,7 @@ import os
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from app.db.database import init_db, AsyncSessionLocal, engine
+from app.db.database import init_db, AsyncSessionLocal, engine, ensure_container_record_columns
 from app.services.crud_service import admin_service, config_service
 from app.core.security import get_password_hash
 from app.core.config import get_settings
@@ -90,6 +90,7 @@ async def check_and_fix_container_table():
             await conn.commit()
             print("  表结构更新完成")
         else:
+            await ensure_container_record_columns(conn)
             print("  表结构正确，无需修改")
 
 
@@ -173,6 +174,12 @@ async def create_default_data():
         )
         await config_service.set_config(
             db,
+            "comp_share_image_id",
+            settings.DEFAULT_COMP_SHARE_IMAGE_ID,
+            description="创建云电脑实例使用的镜像ID",
+        )
+        await config_service.set_config(
+            db,
             "min_balance_to_start",
             str(settings.DEFAULT_MIN_BALANCE_TO_START),
             description="启动云电脑所需最低余额",
@@ -180,6 +187,12 @@ async def create_default_data():
         await config_service.set_config(
             db, "auto_stop_threshold", "0.0", description="自动停止余额阈值"
         )
+        for item in config_service.get_fixed_config_options():
+            await config_service.set_config(
+                db,
+                config_service.get_config_price_key(item["config_code"]),
+                str(settings.DEFAULT_PRICE_PER_MINUTE),
+            )
         print("系统配置初始化完成")
 
         print("\n默认配置:")

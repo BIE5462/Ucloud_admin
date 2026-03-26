@@ -1,15 +1,13 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 from app.db.database import get_db
-from app.api.auth import get_current_user, get_current_admin, get_current_super_admin
+from app.api.auth import get_current_user
 from app.schemas.schemas import (
     ResponseData,
     ContainerCreate,
-    ContainerInfo,
-    ContainerStatus,
     ContainerDeleteRequest,
 )
 from app.services.crud_service import (
@@ -19,9 +17,42 @@ from app.services.crud_service import (
     log_service,
 )
 from app.services.ucloud_service import ucloud_service
-from app.models.models import User, Admin, ContainerRecord
+from app.models.models import User
 
 router = APIRouter(prefix="/container", tags=["容器管理"])
+
+
+def _extract_container_validation_message(exc: ValidationError) -> str:
+    """提取创建容器请求的首个校验错误信息"""
+    first_error = exc.errors()[0] if exc.errors() else {}
+    field_name = ""
+    for item in first_error.get("loc", []):
+        if item != "body":
+            field_name = str(item)
+            break
+
+    if field_name == "config_code":
+        return "套餐编码无效，仅支持 config_1 ~ config_5"
+    if field_name == "instance_name":
+        return "实例名称不能为空"
+
+    return first_error.get("msg", "请求参数错误")
+
+
+@router.get("/config-options", response_model=ResponseData)
+async def get_container_config_options(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+):
+    """获取用户可选套餐列表"""
+    configs = await config_service.get_all_configs(db)
+    return ResponseData(
+        code=200,
+        message="success",
+        data={
+            "min_balance_to_start": configs["min_balance_to_start"],
+            "config_options": configs["config_options"],
+        },
+    )
 
 
 @router.get("/my", response_model=ResponseData)
@@ -43,6 +74,8 @@ async def get_my_container(
                 "id": container.id,
                 "instance_name": container.instance_name,
                 "status": container.status,
+                "config_code": container.config_code,
+                "config_name": container.config_name,
                 "gpu_type": container.gpu_type,
                 "cpu_cores": container.cpu_cores,
                 "memory_gb": container.memory_gb,
@@ -109,12 +142,20 @@ async def get_container_status(
 
 @router.post("", response_model=ResponseData)
 async def create_container(
-    container_data: ContainerCreate,
     request: Request,
+    container_payload: dict = Body(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """创建云电脑"""
+    try:
+        container_data = ContainerCreate.model_validate(container_payload)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=_extract_container_validation_message(exc),
+        ) from exc
+
     # 检查是否已有容器
     existing = await container_service.get_by_user_id(db, current_user.id)
     if existing:
@@ -169,13 +210,19 @@ async def create_container(
             detail=f"余额不足，创建云电脑至少需要{min_balance}元",
         )
 
-    # 获取当前价格
-    price_per_minute = await config_service.get_price_per_minute(db)
+    # 获取当前套餐与共享创建配置
+    try:
+        container_create_config = await config_service.get_container_create_config(
+            db,
+            container_data.config_code,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
-    # 获取当前容器创建配置
-    container_create_config = await config_service.get_container_create_config(db)
-
-    # 调用UCloud创建实例 - 规格参数统一来自系统配置
+    # 调用UCloud创建实例 - 规格参数来自固定套餐，共享镜像来自后台配置
     result = await ucloud_service.create_container(
         instance_name=container_data.instance_name,
         create_config=container_create_config,
@@ -194,14 +241,16 @@ async def create_container(
         {
             "instance_id": result["instance_id"],
             "instance_name": container_data.instance_name,
+            "config_code": container_create_config["config_code"],
+            "config_name": container_create_config["config_name"],
             "gpu_type": container_create_config["gpu_type"],
             "cpu_cores": container_create_config["cpu_cores"],
             "memory_gb": container_create_config["memory_gb"],
-            "storage_gb": 200,
+            "storage_gb": container_create_config["storage_gb"],
+            "price_per_minute": container_create_config["price_per_minute"],
             "ip": result["ip"],
             "password": result["password"],
         },
-        price_per_minute,
     )
 
     # 更新用户当前容器ID
@@ -226,6 +275,8 @@ async def create_container(
         data={
             "container_id": container.id,
             "status": container.status,
+            "config_code": container.config_code,
+            "config_name": container.config_name,
             "started_at": container.started_at.isoformat()
             if container.started_at
             else None,

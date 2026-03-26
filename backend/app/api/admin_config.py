@@ -1,7 +1,6 @@
 import json
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
-from pydantic import ValidationError
+from fastapi import APIRouter, Body, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_admin, get_current_super_admin
@@ -90,18 +89,18 @@ async def update_price(
 ):
     """兼容旧版价格更新接口（仅超级管理员）"""
     configs = await config_service.get_all_configs(db)
-    merged_configs = {
-        **configs,
-        "price_per_minute": price_per_minute,
-    }
-
-    try:
-        config_update = SystemConfigUpdate(**merged_configs)
-    except ValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=exc.errors(),
-        ) from exc
+    config_update = SystemConfigUpdate(
+        min_balance_to_start=configs["min_balance_to_start"],
+        auto_stop_threshold=configs["auto_stop_threshold"],
+        comp_share_image_id=configs["comp_share_image_id"],
+        config_prices=[
+            {
+                "config_code": item["config_code"],
+                "price_per_minute": price_per_minute,
+            }
+            for item in configs["config_options"]
+        ],
+    )
 
     new_configs = await _save_system_configs(
         db,

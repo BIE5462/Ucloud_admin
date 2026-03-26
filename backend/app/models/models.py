@@ -85,6 +85,8 @@ class ContainerRecord(Base):
     ucloud_instance_id = Column(String(100), nullable=False, comment="UCloud实例ID")
     instance_name = Column(String(100), nullable=False, comment="实例名称")
     status = Column(String(20), default="creating", comment="状态")
+    config_code = Column(String(50), nullable=True, comment="套餐编码")
+    config_name = Column(String(100), nullable=True, comment="套餐名称")
     gpu_type = Column(String(50), nullable=False, comment="GPU类型")
     cpu_cores = Column(Integer, nullable=False, comment="CPU核数")
     memory_gb = Column(Integer, nullable=False, comment="内存大小GB")

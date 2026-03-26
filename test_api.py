@@ -104,12 +104,16 @@ def test_update_system_config(token, config):
         resp = requests.put(
             f"{BASE_URL}/api/admin/config",
             json={
-                "price_per_minute": config.get("price_per_minute"),
                 "min_balance_to_start": config.get("min_balance_to_start"),
+                "auto_stop_threshold": config.get("auto_stop_threshold", 0),
                 "comp_share_image_id": config.get("comp_share_image_id"),
-                "gpu_type": config.get("gpu_type"),
-                "cpu_cores": config.get("cpu_cores"),
-                "memory_gb": config.get("memory_gb"),
+                "config_prices": [
+                    {
+                        "config_code": item.get("config_code"),
+                        "price_per_minute": item.get("price_per_minute"),
+                    }
+                    for item in config.get("config_options", [])
+                ],
             },
             headers={
                 "Content-Type": "application/json",

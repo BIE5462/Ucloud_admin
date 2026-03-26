@@ -13,6 +13,10 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.core.config import get_settings
+from app.core.container_configs import (
+    FIXED_CONTAINER_CONFIGS,
+    build_config_price_key,
+)
 from app.services.crud_service import ConfigService
 from app.services.ucloud_service import UCloudService
 
@@ -29,9 +33,6 @@ class ConfigServiceTestCase(unittest.TestCase):
             configs["comp_share_image_id"],
             settings.DEFAULT_COMP_SHARE_IMAGE_ID,
         )
-        self.assertEqual(configs["gpu_type"], settings.DEFAULT_GPU_TYPE)
-        self.assertEqual(configs["cpu_cores"], settings.DEFAULT_CPU_CORES)
-        self.assertEqual(configs["memory_gb"], settings.DEFAULT_MEMORY_GB)
         self.assertEqual(
             configs["price_per_minute"],
             settings.DEFAULT_PRICE_PER_MINUTE,
@@ -41,27 +42,42 @@ class ConfigServiceTestCase(unittest.TestCase):
             settings.DEFAULT_MIN_BALANCE_TO_START,
         )
         self.assertEqual(configs["auto_stop_threshold"], 0.0)
+        self.assertEqual(len(configs["config_options"]), len(FIXED_CONTAINER_CONFIGS))
+
+        for expected, actual in zip(FIXED_CONTAINER_CONFIGS, configs["config_options"]):
+            self.assertEqual(actual["config_code"], expected["config_code"])
+            self.assertEqual(actual["config_name"], expected["config_name"])
+            self.assertEqual(actual["gpu_type"], expected["gpu_type"])
+            self.assertEqual(actual["cpu_cores"], expected["cpu_cores"])
+            self.assertEqual(actual["memory_gb"], expected["memory_gb"])
+            self.assertEqual(actual["storage_gb"], expected["storage_gb"])
+            self.assertEqual(
+                actual["price_per_minute"], settings.DEFAULT_PRICE_PER_MINUTE
+            )
 
     def test_normalize_configs_casts_and_sanitizes_values(self):
+        config_3_price = 1.2
         configs = ConfigService.normalize_configs(
             {
                 "price_per_minute": "0.8",
                 "min_balance_to_start": "5.5",
-                "auto_stop_threshold": "1.2",
+                "auto_stop_threshold": "0.6",
                 "comp_share_image_id": " image-123 ",
-                "gpu_type": " 4090 ",
-                "cpu_cores": "16",
-                "memory_gb": "64",
+                build_config_price_key("config_3"): str(config_3_price),
             }
         )
 
         self.assertEqual(configs["price_per_minute"], 0.8)
         self.assertEqual(configs["min_balance_to_start"], 5.5)
-        self.assertEqual(configs["auto_stop_threshold"], 1.2)
+        self.assertEqual(configs["auto_stop_threshold"], 0.6)
         self.assertEqual(configs["comp_share_image_id"], "image-123")
-        self.assertEqual(configs["gpu_type"], "4090")
-        self.assertEqual(configs["cpu_cores"], 16)
-        self.assertEqual(configs["memory_gb"], 64)
+
+        config_option_map = {
+            item["config_code"]: item for item in configs["config_options"]
+        }
+        self.assertEqual(config_option_map["config_3"]["price_per_minute"], config_3_price)
+        self.assertEqual(config_option_map["config_1"]["price_per_minute"], 0.8)
+        self.assertEqual(config_option_map["config_5"]["price_per_minute"], 0.8)
 
 
 class UCloudServiceTestCase(unittest.TestCase):
@@ -75,6 +91,7 @@ class UCloudServiceTestCase(unittest.TestCase):
                 "gpu_type": "4090",
                 "cpu_cores": 24,
                 "memory_gb": 64,
+                "storage_gb": 240,
             },
         )
 
@@ -86,7 +103,7 @@ class UCloudServiceTestCase(unittest.TestCase):
         self.assertEqual(payload["Memory"], 64 * 1024)
         self.assertEqual(payload["GPU"], 1)
         self.assertEqual(payload["ChargeType"], "Postpay")
-        self.assertEqual(payload["Disks"][0]["Size"], 200)
+        self.assertEqual(payload["Disks"][0]["Size"], 240)
         self.assertEqual(payload["Disks"][0]["Type"], "CLOUD_SSD")
         self.assertEqual(payload["Name"], "测试实例")
 

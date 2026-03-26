@@ -15,6 +15,12 @@ from app.models.models import (
 )
 from app.core.security import get_password_hash
 from app.core.config import get_settings
+from app.core.container_configs import (
+    FIXED_CONTAINER_CONFIGS,
+    build_config_price_key,
+    get_fixed_container_config,
+    get_fixed_container_configs,
+)
 
 settings = get_settings()
 
@@ -240,7 +246,7 @@ class ContainerService:
 
     @staticmethod
     async def create(
-        db: AsyncSession, user_id: int, container_data: dict, price_per_minute: float
+        db: AsyncSession, user_id: int, container_data: dict
     ) -> ContainerRecord:
         """创建容器记录"""
         container = ContainerRecord(
@@ -250,11 +256,13 @@ class ContainerService:
             status="running",
             started_at=datetime.utcnow(),
             stopped_at=None,
+            config_code=container_data.get("config_code"),
+            config_name=container_data.get("config_name"),
             gpu_type=container_data["gpu_type"],
             cpu_cores=container_data["cpu_cores"],
             memory_gb=container_data["memory_gb"],
             storage_gb=container_data["storage_gb"],
-            price_per_minute=price_per_minute,
+            price_per_minute=container_data["price_per_minute"],
             connection_host=container_data["ip"],
             connection_port=3389,
             connection_username="user",
@@ -358,20 +366,20 @@ class ConfigService:
     """配置服务"""
 
     CONFIG_DESCRIPTIONS = {
-        "price_per_minute": "云电脑每分钟价格（元）",
+        "price_per_minute": "云电脑兼容单价配置（元/分钟）",
         "min_balance_to_start": "启动云电脑所需的最低余额（元）",
         "comp_share_image_id": "创建云电脑实例使用的镜像ID",
-        "gpu_type": "创建云电脑实例使用的GPU类型",
-        "cpu_cores": "创建云电脑实例使用的CPU核数",
-        "memory_gb": "创建云电脑实例使用的内存大小（GB）",
+        "gpu_type": "旧版创建云电脑实例使用的GPU类型",
+        "cpu_cores": "旧版创建云电脑实例使用的CPU核数",
+        "memory_gb": "旧版创建云电脑实例使用的内存大小（GB）",
         "auto_stop_threshold": "自动关机余额阈值（元）",
+        **{
+            build_config_price_key(item["config_code"]): (
+                f"{item['config_name']} 套餐每分钟价格（元）"
+            )
+            for item in FIXED_CONTAINER_CONFIGS
+        },
     }
-    CONTAINER_CREATE_CONFIG_KEYS = (
-        "comp_share_image_id",
-        "gpu_type",
-        "cpu_cores",
-        "memory_gb",
-    )
 
     @staticmethod
     async def get_config(db: AsyncSession, key: str) -> Optional[SystemConfig]:
@@ -433,7 +441,23 @@ class ConfigService:
         updated_by: int = None,
     ) -> None:
         """批量设置配置项"""
-        for key, value in config_data.items():
+        flat_config_data = dict(config_data)
+        config_prices = flat_config_data.pop("config_prices", [])
+
+        if config_prices:
+            legacy_price = settings.DEFAULT_PRICE_PER_MINUTE
+            for item in config_prices:
+                config_code = item["config_code"]
+                price_per_minute = item["price_per_minute"]
+                flat_config_data[
+                    ConfigService.get_config_price_key(config_code)
+                ] = price_per_minute
+                if config_code == "config_1":
+                    legacy_price = price_per_minute
+
+            flat_config_data["price_per_minute"] = legacy_price
+
+        for key, value in flat_config_data.items():
             await ConfigService._upsert_config(
                 db,
                 key,
@@ -466,13 +490,39 @@ class ConfigService:
         return text or default
 
     @staticmethod
+    def get_config_price_key(config_code: str) -> str:
+        return build_config_price_key(config_code)
+
+    @staticmethod
+    def get_fixed_config_options() -> List[dict]:
+        return get_fixed_container_configs()
+
+    @staticmethod
+    def get_fixed_config_option(config_code: str) -> Optional[dict]:
+        return get_fixed_container_config(config_code)
+
+    @staticmethod
     def normalize_configs(config_dict: dict) -> dict:
         """合并默认值并转换为可直接使用的配置"""
+        legacy_price = ConfigService._parse_float_value(
+            config_dict.get("price_per_minute"),
+            settings.DEFAULT_PRICE_PER_MINUTE,
+        )
+        config_options = []
+        for item in ConfigService.get_fixed_config_options():
+            price_key = ConfigService.get_config_price_key(item["config_code"])
+            config_options.append(
+                {
+                    **item,
+                    "price_per_minute": ConfigService._parse_float_value(
+                        config_dict.get(price_key),
+                        legacy_price,
+                    ),
+                }
+            )
+
         return {
-            "price_per_minute": ConfigService._parse_float_value(
-                config_dict.get("price_per_minute"),
-                settings.DEFAULT_PRICE_PER_MINUTE,
-            ),
+            "price_per_minute": legacy_price,
             "min_balance_to_start": ConfigService._parse_float_value(
                 config_dict.get("min_balance_to_start"),
                 settings.DEFAULT_MIN_BALANCE_TO_START,
@@ -485,18 +535,7 @@ class ConfigService:
                 config_dict.get("comp_share_image_id"),
                 settings.DEFAULT_COMP_SHARE_IMAGE_ID,
             ),
-            "gpu_type": ConfigService._parse_text_value(
-                config_dict.get("gpu_type"),
-                settings.DEFAULT_GPU_TYPE,
-            ),
-            "cpu_cores": ConfigService._parse_int_value(
-                config_dict.get("cpu_cores"),
-                settings.DEFAULT_CPU_CORES,
-            ),
-            "memory_gb": ConfigService._parse_int_value(
-                config_dict.get("memory_gb"),
-                settings.DEFAULT_MEMORY_GB,
-            ),
+            "config_options": config_options,
         }
 
     @staticmethod
@@ -506,6 +545,14 @@ class ConfigService:
         if config:
             return ConfigService._parse_float_value(
                 config.config_value,
+                settings.DEFAULT_PRICE_PER_MINUTE,
+            )
+
+        configs = await ConfigService.get_all_configs(db)
+        config_options = configs.get("config_options", [])
+        if config_options:
+            return ConfigService._parse_float_value(
+                config_options[0].get("price_per_minute"),
                 settings.DEFAULT_PRICE_PER_MINUTE,
             )
         return settings.DEFAULT_PRICE_PER_MINUTE
@@ -534,12 +581,38 @@ class ConfigService:
         return ConfigService.normalize_configs(config_dict)
 
     @staticmethod
-    async def get_container_create_config(db: AsyncSession) -> dict:
+    async def get_container_config_options(db: AsyncSession) -> List[dict]:
+        """获取用户可选套餐列表"""
+        configs = await ConfigService.get_all_configs(db)
+        return configs["config_options"]
+
+    @staticmethod
+    async def get_container_create_config(
+        db: AsyncSession, config_code: str
+    ) -> dict:
         """获取创建容器实例所需的配置"""
         configs = await ConfigService.get_all_configs(db)
+        selected_option = next(
+            (
+                item
+                for item in configs["config_options"]
+                if item["config_code"] == config_code
+            ),
+            None,
+        )
+
+        if not selected_option:
+            raise ValueError(f"未知套餐编码: {config_code}")
+
         return {
-            key: configs[key]
-            for key in ConfigService.CONTAINER_CREATE_CONFIG_KEYS
+            "comp_share_image_id": configs["comp_share_image_id"],
+            "config_code": selected_option["config_code"],
+            "config_name": selected_option["config_name"],
+            "gpu_type": selected_option["gpu_type"],
+            "cpu_cores": selected_option["cpu_cores"],
+            "memory_gb": selected_option["memory_gb"],
+            "storage_gb": selected_option["storage_gb"],
+            "price_per_minute": selected_option["price_per_minute"],
         }
 
 

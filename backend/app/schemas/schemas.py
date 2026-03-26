@@ -1,8 +1,10 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
+
+from app.core.container_configs import VALID_CONTAINER_CONFIG_CODES
 
 
 # ==================== 响应基类 ====================
@@ -110,8 +112,31 @@ class AdminInfo(BaseModel):
 
 
 # ==================== 容器相关 ====================
+ContainerConfigCode = Literal[
+    "config_1",
+    "config_2",
+    "config_3",
+    "config_4",
+    "config_5",
+]
+
+
+class ConfigPriceItem(BaseModel):
+    config_code: ContainerConfigCode
+    price_per_minute: float = Field(gt=0)
+
+
+class ConfigOptionInfo(ConfigPriceItem):
+    config_name: str
+    gpu_type: str
+    cpu_cores: int
+    memory_gb: int
+    storage_gb: int
+
+
 class ContainerCreate(BaseModel):
     instance_name: str = Field(min_length=1)
+    config_code: ContainerConfigCode
     force: bool = False  # 强制创建，删除已有实例
 
     @field_validator("instance_name")
@@ -127,6 +152,8 @@ class ContainerInfo(BaseModel):
     id: int
     instance_name: str
     status: str
+    config_code: Optional[str] = None
+    config_name: Optional[str] = None
     gpu_type: str
     cpu_cores: int
     memory_gb: int
@@ -167,14 +194,12 @@ class ContainerDeleteRequest(BaseModel):
 
 # ==================== 系统配置相关 ====================
 class SystemConfigUpdate(BaseModel):
-    price_per_minute: float = Field(gt=0)
     min_balance_to_start: float = Field(ge=0)
+    auto_stop_threshold: float = Field(ge=0)
     comp_share_image_id: str = Field(min_length=1)
-    gpu_type: str = Field(min_length=1)
-    cpu_cores: int = Field(gt=0)
-    memory_gb: int = Field(gt=0)
+    config_prices: List[ConfigPriceItem]
 
-    @field_validator("comp_share_image_id", "gpu_type")
+    @field_validator("comp_share_image_id")
     @classmethod
     def validate_non_empty_text(cls, value: str) -> str:
         value = value.strip()
@@ -182,15 +207,27 @@ class SystemConfigUpdate(BaseModel):
             raise ValueError("配置项不能为空")
         return value
 
+    @field_validator("config_prices")
+    @classmethod
+    def validate_config_prices(
+        cls, value: List[ConfigPriceItem]
+    ) -> List[ConfigPriceItem]:
+        config_codes = [item.config_code for item in value]
+        if len(config_codes) != len(set(config_codes)):
+            raise ValueError("套餐价格配置存在重复项")
+
+        if set(config_codes) != set(VALID_CONTAINER_CONFIG_CODES):
+            raise ValueError("套餐价格配置必须覆盖全部固定套餐")
+
+        return value
+
 
 class SystemConfigInfo(BaseModel):
-    price_per_minute: float
+    price_per_minute: Optional[float] = None
     min_balance_to_start: float
     auto_stop_threshold: float = 0.0
     comp_share_image_id: str
-    gpu_type: str
-    cpu_cores: int
-    memory_gb: int
+    config_options: List[ConfigOptionInfo]
 
 
 # ==================== 扣费记录相关 ====================

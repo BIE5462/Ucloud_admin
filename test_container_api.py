@@ -64,19 +64,57 @@ def user_login(phone="123456789", password="123456789"):
         return None
 
 
-def create_container(token, instance_name="测试实例"):
+def get_container_config_options(token):
+    """获取用户可选套餐"""
+    print("\n" + "=" * 60)
+    print("步骤 3: 获取可选套餐")
+    print("=" * 60)
+    print(f"请求: GET {BASE_URL}/api/container/config-options")
+
+    try:
+        resp = requests.get(
+            f"{BASE_URL}/api/container/config-options",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+
+        data = resp.json()
+        print(f"\n状态码: {resp.status_code}")
+        print(f"响应码: {data.get('code')}")
+        print(f"消息: {data.get('message')}")
+
+        if resp.status_code == 200 and data.get("code") == 200:
+            payload = data.get("data", {})
+            config_options = payload.get("config_options", [])
+            print(f"✅ 获取套餐成功，共 {len(config_options)} 个套餐")
+            if config_options:
+                print(
+                    f"默认使用套餐: {json.dumps(config_options[0], ensure_ascii=False)}"
+                )
+                return config_options[0].get("config_code")
+
+        print(f"❌ 获取套餐失败: {data.get('detail', data.get('message'))}")
+        return None
+    except Exception as e:
+        print(f"❌ [错误] {e}")
+        return None
+
+
+def create_container(token, instance_name="测试实例", config_code="config_1"):
     """测试创建容器实例"""
     print("\n" + "=" * 60)
-    print("步骤 3: 创建容器实例")
+    print("步骤 4: 创建容器实例")
     print("=" * 60)
     print(f"请求: POST {BASE_URL}/api/container")
     print(f"请求头: Authorization: Bearer {token[:20]}...")
-    print(f"请求体: {{'instance_name': '{instance_name}'}}")
+    print(
+        f"请求体: {{'instance_name': '{instance_name}', 'config_code': '{config_code}'}}"
+    )
 
     try:
         resp = requests.post(
             f"{BASE_URL}/api/container",
-            json={"instance_name": instance_name},
+            json={"instance_name": instance_name, "config_code": config_code},
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {token}",
@@ -94,6 +132,8 @@ def create_container(token, instance_name="测试实例"):
             print(f"✅ 容器创建成功!")
             print(f"容器ID: {container_data.get('container_id')}")
             print(f"状态: {container_data.get('status')}")
+            print(f"套餐编码: {container_data.get('config_code')}")
+            print(f"套餐名称: {container_data.get('config_name')}")
             print(f"预计创建时间: {container_data.get('estimated_time')} 秒")
             return container_data.get("container_id")
         elif resp.status_code == 400:
@@ -119,7 +159,7 @@ def create_container(token, instance_name="测试实例"):
 def get_my_container(token):
     """获取我的容器信息"""
     print("\n" + "=" * 60)
-    print("步骤 4: 获取我的容器信息")
+    print("步骤 5: 获取我的容器信息")
     print("=" * 60)
     print(f"请求: GET {BASE_URL}/api/container/my")
 
@@ -142,6 +182,8 @@ def get_my_container(token):
                 print(f"  容器ID: {container.get('id')}")
                 print(f"  实例名称: {container.get('instance_name')}")
                 print(f"  状态: {container.get('status')}")
+                print(f"  套餐编码: {container.get('config_code')}")
+                print(f"  套餐名称: {container.get('config_name')}")
                 print(f"  GPU类型: {container.get('gpu_type')}")
                 print(f"  CPU核心: {container.get('cpu_cores')}")
                 print(f"  内存: {container.get('memory_gb')} GB")
@@ -175,8 +217,18 @@ def main():
         print("\n❌ 登录失败，测试终止")
         sys.exit(1)
 
+    # 获取套餐信息
+    config_code = get_container_config_options(token)
+    if not config_code:
+        print("\n❌ 获取套餐失败，测试终止")
+        sys.exit(1)
+
     # 创建容器实例
-    container_id = create_container(token, instance_name="API测试实例")
+    container_id = create_container(
+        token,
+        instance_name="API测试实例",
+        config_code=config_code,
+    )
 
     # 获取容器信息
     get_my_container(token)

@@ -81,7 +81,7 @@ class UCloudService:
             "Disks": [
                 {
                     "IsBoot": True,
-                    "Size": 200,
+                    "Size": create_config.get("storage_gb", 200),
                     "Type": "CLOUD_SSD",
                 }
             ],
