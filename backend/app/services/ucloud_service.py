@@ -158,6 +158,10 @@ class UCloudService:
                 return {"success": False, "error": "删除失败"}
 
         except Exception as e:
+            error_message = str(e)
+            lowered_message = error_message.lower()
+            if "not found" in lowered_message or "不存在" in error_message:
+                return {"success": True, "already_deleted": True}
             return {"success": False, "error": str(e)}
 
     async def get_instance_info(self, instance_id: str) -> dict:

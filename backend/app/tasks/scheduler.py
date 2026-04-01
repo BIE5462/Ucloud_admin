@@ -1,8 +1,7 @@
+import logging
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 from app.db.database import AsyncSessionLocal
 from app.services.crud_service import (
@@ -13,14 +12,12 @@ from app.services.crud_service import (
 )
 from app.services.ucloud_service import ucloud_service
 from app.models.models import (
-    ContainerRecord,
-    User,
-    Admin,
     BillingChargeRecord,
     ContainerLog,
 )
 
 scheduler = AsyncIOScheduler()
+logger = logging.getLogger(__name__)
 
 
 async def charge_running_containers():
@@ -108,6 +105,49 @@ async def charge_running_containers():
             await db.rollback()
 
 
+async def process_pending_container_deletions():
+    """后台推进删除中的容器任务"""
+    async with AsyncSessionLocal() as db:
+        try:
+            deleting_containers = await container_service.list_by_status(db, "deleting")
+
+            for container in deleting_containers:
+                user = await user_service.get_by_id(db, container.user_id)
+                if not user:
+                    continue
+
+                result = await ucloud_service.delete_container(
+                    container.ucloud_instance_id
+                )
+                if not result["success"]:
+                    logger.warning(
+                        "容器 %s 删除仍在处理中: %s",
+                        container.ucloud_instance_id,
+                        result.get("error", "未知错误"),
+                    )
+                    continue
+
+                await container_service.delete(db, container)
+                user.current_container_id = None
+                await db.commit()
+                await user_service.clear_container_operation(db, user, "deleting")
+
+                log = ContainerLog(
+                    user_id=user.id,
+                    admin_id=user.admin_id,
+                    container_id=container.id,
+                    action="delete",
+                    action_status="success",
+                    error_message="后台自动完成删除任务",
+                )
+                db.add(log)
+                await db.commit()
+
+        except Exception as e:
+            logger.exception("删除补偿任务执行失败: %s", e)
+            await db.rollback()
+
+
 def start_scheduler():
     """启动定时任务"""
     # 每分钟执行一次扣费任务
@@ -116,6 +156,13 @@ def start_scheduler():
         trigger=IntervalTrigger(minutes=1),
         id="charge_task",
         name="每分钟扣费任务",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        process_pending_container_deletions,
+        trigger=IntervalTrigger(seconds=10),
+        id="pending_delete_task",
+        name="待删除容器补偿任务",
         replace_existing=True,
     )
     scheduler.start()

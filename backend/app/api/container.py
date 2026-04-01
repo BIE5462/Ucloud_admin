@@ -39,6 +39,53 @@ def _extract_container_validation_message(exc: ValidationError) -> str:
     return first_error.get("msg", "请求参数错误")
 
 
+def _serialize_container(container) -> dict:
+    """序列化容器信息"""
+    return {
+        "id": container.id,
+        "instance_name": container.instance_name,
+        "status": container.status,
+        "config_code": container.config_code,
+        "config_name": container.config_name,
+        "gpu_type": container.gpu_type,
+        "cpu_cores": container.cpu_cores,
+        "memory_gb": container.memory_gb,
+        "storage_gb": container.storage_gb,
+        "price_per_minute": container.price_per_minute,
+        "created_at": container.created_at.isoformat()
+        if container.created_at
+        else None,
+        "started_at": container.started_at.isoformat()
+        if container.started_at
+        else None,
+        "stopped_at": container.stopped_at.isoformat()
+        if container.stopped_at
+        else None,
+        "total_running_minutes": container.total_running_minutes,
+        "total_cost": container.total_cost,
+    }
+
+
+def _serialize_pending_operation(current_user: User):
+    """序列化用户当前容器操作状态"""
+    if not current_user.container_operation_status:
+        return None
+
+    message_map = {
+        "creating": "云电脑正在创建中，请稍候刷新",
+        "deleting": "云电脑正在删除中，关闭客户端不会中断处理",
+    }
+    return {
+        "status": current_user.container_operation_status,
+        "started_at": current_user.container_operation_started_at.isoformat()
+        if current_user.container_operation_started_at
+        else None,
+        "message": message_map.get(
+            current_user.container_operation_status, "容器任务处理中"
+        ),
+    }
+
+
 @router.get("/config-options", response_model=ResponseData)
 async def get_container_config_options(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
@@ -60,36 +107,27 @@ async def get_my_container(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """获取我的云电脑"""
+    await db.refresh(current_user)
+    await user_service.clear_stale_container_operation(db, current_user)
     container = await container_service.get_by_user_id(db, current_user.id)
 
     if not container:
-        return ResponseData(code=200, message="success", data={"has_container": False})
+        return ResponseData(
+            code=200,
+            message="success",
+            data={
+                "has_container": False,
+                "pending_operation": _serialize_pending_operation(current_user),
+            },
+        )
 
     return ResponseData(
         code=200,
         message="success",
         data={
             "has_container": True,
-            "container": {
-                "id": container.id,
-                "instance_name": container.instance_name,
-                "status": container.status,
-                "config_code": container.config_code,
-                "config_name": container.config_name,
-                "gpu_type": container.gpu_type,
-                "cpu_cores": container.cpu_cores,
-                "memory_gb": container.memory_gb,
-                "storage_gb": container.storage_gb,
-                "price_per_minute": container.price_per_minute,
-                "created_at": container.created_at.isoformat()
-                if container.created_at
-                else None,
-                "started_at": container.started_at.isoformat()
-                if container.started_at
-                else None,
-                "total_running_minutes": container.total_running_minutes,
-                "total_cost": container.total_cost,
-            },
+            "container": _serialize_container(container),
+            "pending_operation": _serialize_pending_operation(current_user),
         },
     )
 
@@ -156,9 +194,27 @@ async def create_container(
             detail=_extract_container_validation_message(exc),
         ) from exc
 
+    await db.refresh(current_user)
+    await user_service.clear_stale_container_operation(db, current_user)
+
+    if current_user.container_operation_status == "creating":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "已有云电脑创建任务正在处理中，请稍候刷新结果",
+                "operation_in_progress": True,
+                "pending_operation": _serialize_pending_operation(current_user),
+            },
+        )
+
     # 检查是否已有容器
     existing = await container_service.get_by_user_id(db, current_user.id)
     if existing:
+        if existing.status == "deleting":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="旧云电脑正在删除中，请等待删除完成后再创建",
+            )
         if not container_data.force:
             # 返回特定错误码，提示需要确认删除
             raise HTTPException(
@@ -202,93 +258,113 @@ async def create_container(
                 detail=f"删除旧实例时出错: {str(e)}",
             )
 
-    # 检查余额
-    min_balance = await config_service.get_min_balance_to_start(db)
-    if current_user.balance < min_balance:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=f"余额不足，创建云电脑至少需要{min_balance}元",
-        )
-
-    # 获取当前套餐与共享创建配置
-    try:
-        container_create_config = await config_service.get_container_create_config(
-            db,
-            container_data.config_code,
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
-
-    # 调用UCloud创建实例 - 规格参数来自固定套餐，共享镜像来自后台配置
-    result = await ucloud_service.create_container(
-        instance_name=container_data.instance_name,
-        create_config=container_create_config,
+    lock_acquired = await user_service.acquire_container_operation(
+        db, current_user.id, "creating"
     )
-
-    if not result["success"]:
+    if not lock_acquired:
+        await db.refresh(current_user)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"创建失败: {result.get('error', '未知错误')}",
-        )
-
-    # 创建容器记录 - 保存本次实际生效的系统配置快照
-    container = await container_service.create(
-        db,
-        current_user.id,
-        {
-            "instance_id": result["instance_id"],
-            "instance_name": container_data.instance_name,
-            "config_code": container_create_config["config_code"],
-            "config_name": container_create_config["config_name"],
-            "gpu_type": container_create_config["gpu_type"],
-            "cpu_cores": container_create_config["cpu_cores"],
-            "memory_gb": container_create_config["memory_gb"],
-            "storage_gb": container_create_config["storage_gb"],
-            "price_per_minute": container_create_config["price_per_minute"],
-            "ip": result["ip"],
-            "password": result["password"],
-        },
-    )
-
-    # 更新用户当前容器ID
-    current_user.current_container_id = container.id
-    await db.commit()
-
-    # 记录日志
-    await log_service.create_container_log(
-        db,
-        user_id=current_user.id,
-        admin_id=current_user.admin_id,
-        container_id=container.id,
-        action="create",
-        action_status="success",
-        started_at=container.started_at,
-        ip_address=request.client.host,
-    )
-
-    return ResponseData(
-        code=200,
-        message="云电脑创建成功，已自动启动",
-        data={
-            "container_id": container.id,
-            "status": container.status,
-            "config_code": container.config_code,
-            "config_name": container.config_name,
-            "started_at": container.started_at.isoformat()
-            if container.started_at
-            else None,
-            "connection_info": {
-                "host": container.connection_host,
-                "port": container.connection_port,
-                "username": container.connection_username,
-                "password": container.connection_password,
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "已有云电脑创建任务正在处理中，请稍候刷新结果",
+                "operation_in_progress": True,
+                "pending_operation": _serialize_pending_operation(current_user),
             },
-            "estimated_time": 120,
-        },
-    )
+        )
+
+    try:
+        # 检查余额
+        min_balance = await config_service.get_min_balance_to_start(db)
+        if current_user.balance < min_balance:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"余额不足，创建云电脑至少需要{min_balance}元",
+            )
+
+        # 获取当前套餐与共享创建配置
+        try:
+            container_create_config = await config_service.get_container_create_config(
+                db,
+                container_data.config_code,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+
+        # 调用UCloud创建实例 - 规格参数来自固定套餐，共享镜像来自后台配置
+        result = await ucloud_service.create_container(
+            instance_name=container_data.instance_name,
+            create_config=container_create_config,
+        )
+
+        if not result["success"]:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"创建失败: {result.get('error', '未知错误')}",
+            )
+
+        # 创建容器记录 - 保存本次实际生效的系统配置快照
+        container = await container_service.create(
+            db,
+            current_user.id,
+            {
+                "instance_id": result["instance_id"],
+                "instance_name": container_data.instance_name,
+                "config_code": container_create_config["config_code"],
+                "config_name": container_create_config["config_name"],
+                "gpu_type": container_create_config["gpu_type"],
+                "cpu_cores": container_create_config["cpu_cores"],
+                "memory_gb": container_create_config["memory_gb"],
+                "storage_gb": container_create_config["storage_gb"],
+                "price_per_minute": container_create_config["price_per_minute"],
+                "ip": result["ip"],
+                "password": result["password"],
+            },
+        )
+
+        current_user.current_container_id = container.id
+        current_user.container_operation_status = None
+        current_user.container_operation_started_at = None
+        await db.commit()
+
+        await log_service.create_container_log(
+            db,
+            user_id=current_user.id,
+            admin_id=current_user.admin_id,
+            container_id=container.id,
+            action="create",
+            action_status="success",
+            started_at=container.started_at,
+            ip_address=request.client.host,
+        )
+
+        return ResponseData(
+            code=200,
+            message="云电脑创建成功，已自动启动",
+            data={
+                "container_id": container.id,
+                "status": container.status,
+                "config_code": container.config_code,
+                "config_name": container.config_name,
+                "started_at": container.started_at.isoformat()
+                if container.started_at
+                else None,
+                "connection_info": {
+                    "host": container.connection_host,
+                    "port": container.connection_port,
+                    "username": container.connection_username,
+                    "password": container.connection_password,
+                },
+                "estimated_time": 120,
+            },
+        )
+    finally:
+        await db.rollback()
+        refreshed_user = await user_service.get_by_id(db, current_user.id)
+        if refreshed_user and refreshed_user.container_operation_status == "creating":
+            await user_service.clear_container_operation(db, refreshed_user, "creating")
 
 
 @router.post("/start", response_model=ResponseData)
@@ -308,6 +384,15 @@ async def start_container(
     if container.status == "running":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="云电脑已在运行中"
+        )
+    if container.status == "deleting":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="云电脑正在删除中，无法启动"
+        )
+    if container.status not in {"stopped"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"当前状态为 {container.status}，暂不支持启动",
         )
 
     # 检查余额
@@ -446,6 +531,8 @@ async def delete_container(
     db: AsyncSession = Depends(get_db),
 ):
     """删除云电脑"""
+    await db.refresh(current_user)
+    await user_service.clear_stale_container_operation(db, current_user)
     container = await container_service.get_by_user_id(db, current_user.id)
 
     if not container:
@@ -456,6 +543,22 @@ async def delete_container(
     if not delete_request.confirm:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="请确认删除"
+        )
+
+    if container.status == "deleting":
+        return ResponseData(
+            code=200,
+            message="删除任务已在后台处理中",
+            data={
+                "status": "deleting",
+                "message": "云电脑正在删除中，关闭客户端不会中断处理",
+            },
+        )
+
+    if current_user.container_operation_status == "creating":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="云电脑正在创建中，暂时无法删除，请稍后重试",
         )
 
     # 如果正在运行，先停止
@@ -469,15 +572,44 @@ async def delete_container(
         )
 
         # 停止UCloud实例
-        await ucloud_service.stop_container(container.ucloud_instance_id)
+        stop_result = await ucloud_service.stop_container(container.ucloud_instance_id)
+        if not stop_result["success"]:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"停止失败: {stop_result.get('error', '未知错误')}",
+            )
 
-    # 删除UCloud实例
+        container.stopped_at = datetime.utcnow()
+
+    current_user.container_operation_status = "deleting"
+    current_user.container_operation_started_at = datetime.utcnow()
+    container.status = "deleting"
+    container.connection_host = None
+    container.connection_password = None
+    await db.commit()
+
+    # 先尝试立即删除，失败则交由后台补偿任务继续处理
     result = await ucloud_service.delete_container(container.ucloud_instance_id)
 
     if not result["success"]:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"删除失败: {result.get('error', '未知错误')}",
+        await log_service.create_container_log(
+            db,
+            user_id=current_user.id,
+            admin_id=current_user.admin_id,
+            container_id=container.id,
+            action="delete",
+            action_status="success",
+            request_data=f"{{reason: {delete_request.reason}}}",
+            response_data="后台继续处理删除任务",
+            ip_address=request.client.host,
+        )
+        return ResponseData(
+            code=200,
+            message="删除任务已提交，云端仍在处理中",
+            data={
+                "status": "deleting",
+                "message": "删除任务已交由服务端继续处理，关闭客户端不会中断",
+            },
         )
 
     # 软删除容器记录
@@ -486,6 +618,7 @@ async def delete_container(
     # 清空用户当前容器ID
     current_user.current_container_id = None
     await db.commit()
+    await user_service.clear_container_operation(db, current_user, "deleting")
 
     # 记录日志
     await log_service.create_container_log(

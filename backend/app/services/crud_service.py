@@ -1,9 +1,9 @@
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func, or_
+from sqlalchemy import select, and_, func, or_, update
 from typing import Optional, List
 
-from app.db.database import AsyncSessionLocal
 from app.models.models import (
     User,
     Admin,
@@ -23,6 +23,7 @@ from app.core.container_configs import (
 )
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 class UserService:
@@ -39,6 +40,62 @@ class UserService:
         """根据ID获取用户"""
         result = await db.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()
+
+    @staticmethod
+    async def clear_stale_container_operation(
+        db: AsyncSession, user: User, timeout_minutes: int = 10
+    ) -> bool:
+        """清理超时的容器操作锁"""
+        if not user.container_operation_status or not user.container_operation_started_at:
+            return False
+
+        timeout_at = datetime.utcnow() - timedelta(minutes=timeout_minutes)
+        if user.container_operation_started_at >= timeout_at:
+            return False
+
+        user.container_operation_status = None
+        user.container_operation_started_at = None
+        await db.commit()
+        await db.refresh(user)
+        return True
+
+    @staticmethod
+    async def acquire_container_operation(
+        db: AsyncSession, user_id: int, operation: str
+    ) -> bool:
+        """原子获取用户级容器操作锁"""
+        now = datetime.utcnow()
+        result = await db.execute(
+            update(User)
+            .where(
+                and_(
+                    User.id == user_id,
+                    User.container_operation_status.is_(None),
+                )
+            )
+            .values(
+                container_operation_status=operation,
+                container_operation_started_at=now,
+            )
+        )
+        if result.rowcount:
+            await db.commit()
+            return True
+        await db.rollback()
+        return False
+
+    @staticmethod
+    async def clear_container_operation(
+        db: AsyncSession, user: User, operation: Optional[str] = None
+    ) -> None:
+        """释放用户级容器操作锁"""
+        if operation and user.container_operation_status != operation:
+            return
+
+        user.container_operation_status = None
+        user.container_operation_started_at = None
+        await db.commit()
+        await db.refresh(user)
 
     @staticmethod
     async def create(db: AsyncSession, user_data: dict) -> User:
@@ -225,14 +282,25 @@ class ContainerService:
     ) -> Optional[ContainerRecord]:
         """根据用户ID获取容器"""
         result = await db.execute(
-            select(ContainerRecord).where(
+            select(ContainerRecord)
+            .where(
                 and_(
                     ContainerRecord.user_id == user_id,
                     ContainerRecord.deleted_at.is_(None),
                 )
             )
+            .order_by(ContainerRecord.created_at.desc(), ContainerRecord.id.desc())
         )
-        return result.scalar_one_or_none()
+        containers = result.scalars().all()
+        if not containers:
+            return None
+        if len(containers) > 1:
+            logger.warning(
+                "用户 %s 存在 %s 条未删除容器记录，返回最新的一条记录",
+                user_id,
+                len(containers),
+            )
+        return containers[0]
 
     @staticmethod
     async def get_by_id(
@@ -345,6 +413,23 @@ class ContainerService:
         """获取所有运行中的容器"""
         result = await db.execute(
             select(ContainerRecord).where(ContainerRecord.status == "running")
+        )
+        return result.scalars().all()
+
+    @staticmethod
+    async def list_by_status(
+        db: AsyncSession, status: str
+    ) -> List[ContainerRecord]:
+        """按状态获取未删除容器"""
+        result = await db.execute(
+            select(ContainerRecord)
+            .where(
+                and_(
+                    ContainerRecord.status == status,
+                    ContainerRecord.deleted_at.is_(None),
+                )
+            )
+            .order_by(ContainerRecord.created_at.asc(), ContainerRecord.id.asc())
         )
         return result.scalars().all()
 

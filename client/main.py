@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QClipboard
+from PySide6.QtGui import QFont
 
 # 导入自定义模块
 from config import get_config, ConfigManager
@@ -408,16 +408,13 @@ class MainWindow(QMainWindow):
             "stop": 0.0,
             "delete": 0.0,
         }
+        self.pending_operation = None
+        self.no_container_label = None
+        self.create_container_btn = None
 
         # 设置定时器
         self.status_timer = QTimer()
-        self.status_timer.timeout.connect(self.update_status)
-
-        # 停止并删除的重试机制
-        self.delete_retry_timer = QTimer()
-        self.delete_retry_timer.timeout.connect(self.try_delete_with_retry)
-        self.delete_attempts = 0
-        self.max_delete_attempts = 6  # 最多6次尝试，每次间隔10秒，共60秒
+        self.status_timer.timeout.connect(self.refresh_container)
 
         self.setup_ui()
 
@@ -502,13 +499,13 @@ class MainWindow(QMainWindow):
         layout.setAlignment(Qt.AlignCenter)
         layout.setSpacing(30)
 
-        label = QLabel("您还没有云电脑")
-        label.setFont(QFont("Microsoft YaHei", 24))
-        label.setAlignment(Qt.AlignCenter)
-        label.setStyleSheet("color: #909399;")
+        self.no_container_label = QLabel("您还没有云电脑")
+        self.no_container_label.setFont(QFont("Microsoft YaHei", 24))
+        self.no_container_label.setAlignment(Qt.AlignCenter)
+        self.no_container_label.setStyleSheet("color: #909399;")
 
-        create_btn = QPushButton("➕ 创建云电脑")
-        create_btn.setStyleSheet("""
+        self.create_container_btn = QPushButton("➕ 创建云电脑")
+        self.create_container_btn.setStyleSheet("""
             QPushButton {
                 background-color: #409EFF;
                 color: white;
@@ -525,10 +522,10 @@ class MainWindow(QMainWindow):
                 background-color: #3a8ee6;
             }
         """)
-        create_btn.clicked.connect(self.create_container)
+        self.create_container_btn.clicked.connect(self.create_container)
 
-        layout.addWidget(label)
-        layout.addWidget(create_btn, alignment=Qt.AlignCenter)
+        layout.addWidget(self.no_container_label)
+        layout.addWidget(self.create_container_btn, alignment=Qt.AlignCenter)
         widget.setLayout(layout)
 
         return widget
@@ -734,22 +731,54 @@ class MainWindow(QMainWindow):
             return False, remaining
         return True, 0
 
+    def update_no_container_state(self):
+        """更新无云电脑页面状态"""
+        if not self.no_container_label or not self.create_container_btn:
+            return
+
+        pending_status = (
+            (self.pending_operation or {}).get("status")
+            if isinstance(self.pending_operation, dict)
+            else None
+        )
+        pending_message = (
+            (self.pending_operation or {}).get("message")
+            if isinstance(self.pending_operation, dict)
+            else ""
+        )
+
+        if pending_status == "creating":
+            self.no_container_label.setText("云电脑正在创建中")
+            self.no_container_label.setStyleSheet("color: #E6A23C;")
+            self.create_container_btn.setText("创建处理中...")
+            self.create_container_btn.setEnabled(False)
+            self.create_container_btn.setToolTip(pending_message)
+            return
+
+        self.no_container_label.setText("您还没有云电脑")
+        self.no_container_label.setStyleSheet("color: #909399;")
+        self.create_container_btn.setText("➕ 创建云电脑")
+        self.create_container_btn.setEnabled(True)
+        self.create_container_btn.setToolTip("")
+
     def refresh_container(self):
         """刷新云电脑信息"""
         try:
             result = api_client.get_my_container()
             if result.is_ok():
                 data = result.data or {}
+                self.pending_operation = data.get("pending_operation")
                 if data.get("has_container"):
                     self.container_info = data.get("container", {})
                     self.content_stack.setCurrentIndex(1)
                     self.update_container_display()
 
-                    # 如果正在运行，启动定时器
-                    if (
-                        self.container_info
-                        and self.container_info.get("status") == "running"
-                    ):
+                    # 运行中或处理中状态保持轮询
+                    if self.container_info and self.container_info.get("status") in {
+                        "running",
+                        "creating",
+                        "deleting",
+                    }:
                         if not self.status_timer.isActive():
                             self.status_timer.start(
                                 self.config.auto_refresh_interval * 1000
@@ -758,8 +787,18 @@ class MainWindow(QMainWindow):
                         self.status_timer.stop()
                 else:
                     self.content_stack.setCurrentIndex(0)
-                    self.status_timer.stop()
                     self.container_info = None
+                    self.current_connection_info = None
+                    self.update_no_container_state()
+                    if self.pending_operation and self.pending_operation.get(
+                        "status"
+                    ) == "creating":
+                        if not self.status_timer.isActive():
+                            self.status_timer.start(
+                                self.config.auto_refresh_interval * 1000
+                            )
+                    else:
+                        self.status_timer.stop()
         except Exception as e:
             logging.error(f"刷新云电脑信息失败: {e}")
 
@@ -776,11 +815,13 @@ class MainWindow(QMainWindow):
             "running": "运行中 🟢",
             "stopped": "已停止 🔴",
             "creating": "创建中 🟡",
+            "deleting": "删除中 🟠",
         }
         status_color = {
             "running": "#67C23A",
             "stopped": "#F56C6C",
             "creating": "#E6A23C",
+            "deleting": "#E6A23C",
         }
         color = status_color.get(status_text, "#909399")
         self.status_label.setText(f"状态: {status_map.get(status_text, status_text)}")
@@ -806,10 +847,23 @@ class MainWindow(QMainWindow):
 
         # 按钮状态
         is_running = status_text == "running"
-        self.start_btn.setVisible(not is_running)
+        is_transitioning = status_text in {"creating", "deleting"}
+        self.start_btn.setVisible(status_text == "stopped")
         self.stop_and_delete_btn.setVisible(is_running)
         self.connect_btn.setVisible(is_running)
         self.conn_card.setVisible(is_running)
+        self.start_btn.setEnabled(not is_transitioning)
+
+        if status_text == "deleting":
+            self.runtime_label.setText("本次运行: 正在回收云电脑")
+            self.cost_label.setText("本次消费: 以服务端最终结算为准")
+            self.remaining_label.setText("剩余可用: 删除处理中")
+            self.current_connection_info = None
+        elif status_text == "creating":
+            self.runtime_label.setText("本次运行: 云电脑正在初始化")
+            self.cost_label.setText("本次消费: 待实例启动后开始统计")
+            self.remaining_label.setText("剩余可用: 创建处理中")
+            self.current_connection_info = None
 
         if is_running:
             self.update_status()
@@ -889,6 +943,18 @@ class MainWindow(QMainWindow):
             error_detail = (
                 result.error_detail if isinstance(result.error_detail, dict) else {}
             )
+            if result.code == 409 and error_detail.get("operation_in_progress"):
+                pending_message = (
+                    (error_detail.get("pending_operation") or {}).get("message")
+                    or "云电脑创建任务正在处理中，请稍后刷新"
+                )
+                QMessageBox.information(self, "处理中", pending_message)
+                self.pending_operation = error_detail.get("pending_operation")
+                self.update_no_container_state()
+                if not self.status_timer.isActive():
+                    self.status_timer.start(self.config.auto_refresh_interval * 1000)
+                return
+
             if result.code == 409 and error_detail.get("require_confirm"):
                 existing_container = error_detail.get("existing_container", {})
                 existing_name = existing_container.get("instance_name", "旧实例")
@@ -934,7 +1000,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "失败", result.get_error_display())
 
     def stop_and_delete_container(self):
-        """停止云电脑并在关机完成后自动删除"""
+        """提交删除任务，由服务端继续处理"""
         # 检查冷却时间
         can_operate, remaining = self.check_operation_cooldown("stop")
         if not can_operate:
@@ -947,10 +1013,10 @@ class MainWindow(QMainWindow):
 
         reply = QMessageBox.question(
             self,
-            "确认停止并删除",
-            "确定要停止云电脑并在关机完成后自动删除吗？\n"
+            "确认删除",
+            "确定要删除云电脑吗？\n"
             "⚠️ 删除后数据将不可恢复！\n\n"
-            "系统将在关机完成后自动删除实例（最多等待60秒）。",
+            "删除任务会交给服务端继续处理，即使关闭客户端也不会中断。",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
@@ -959,91 +1025,25 @@ class MainWindow(QMainWindow):
             # 记录操作时间
             self.last_operation_time["stop"] = time.time()
 
-            # 发送停止指令
-            result = api_client.stop_container()
+            result = api_client.delete_container()
             if not result.is_ok():
-                QMessageBox.critical(self, "停止失败", result.get_error_display())
+                QMessageBox.critical(self, "删除失败", result.get_error_display())
                 return
 
-            # 停止状态更新定时器
-            self.status_timer.stop()
-
-            # 创建倒计时对话框
-            self.processing_dialog = QDialog(self)
-            self.processing_dialog.setWindowTitle("正在处理")
-            self.processing_dialog.setFixedSize(350, 150)
-            self.processing_dialog.setModal(True)
-
-            dialog_layout = QVBoxLayout()
-            dialog_layout.setSpacing(15)
-            dialog_layout.setContentsMargins(20, 20, 20, 20)
-
-            # 提示文本
-            self.processing_label = QLabel(
-                "实例正在关机，关机完成后将自动删除...\n请勿关闭客户端。"
+            message = (
+                "删除任务已提交，服务端会继续处理。\n"
+                "即使现在关闭客户端，也不会影响云端删除流程。"
             )
-            self.processing_label.setAlignment(Qt.AlignCenter)
-            dialog_layout.addWidget(self.processing_label)
+            result_data = result.data or {}
+            if result_data.get("status") == "deleting":
+                QMessageBox.information(self, "删除处理中", message)
+            else:
+                QMessageBox.information(self, "完成", "云电脑已删除成功")
 
-            # 倒计时显示
-            self.countdown_label = QLabel("倒计时: 60 秒")
-            self.countdown_label.setAlignment(Qt.AlignCenter)
-            self.countdown_label.setStyleSheet(
-                "font-size: 18px; font-weight: bold; color: #F56C6C;"
-            )
-            dialog_layout.addWidget(self.countdown_label)
-
-            self.processing_dialog.setLayout(dialog_layout)
-            self.processing_dialog.show()
-
-            # 启动倒计时定时器（每秒更新一次）
-            self.countdown_value = 60
-            self.countdown_timer = QTimer()
-            self.countdown_timer.timeout.connect(self.update_countdown)
-            self.countdown_timer.start(1000)
-
-            # 初始化重试机制
-            self.delete_attempts = 0
-            # 10秒后开始首次尝试删除
-            self.delete_retry_timer.start(10000)
-
-    def update_countdown(self):
-        """更新倒计时显示"""
-        self.countdown_value -= 1
-        if hasattr(self, "countdown_label"):
-            self.countdown_label.setText(f"倒计时: {self.countdown_value} 秒")
-
-    def try_delete_with_retry(self):
-        """尝试删除实例，失败则重试"""
-        self.delete_attempts += 1
-
-        result = api_client.delete_container()
-
-        if result.is_ok():
-            # 删除成功
-            self.delete_retry_timer.stop()
-            self.countdown_timer.stop()
-            if hasattr(self, "processing_dialog"):
-                self.processing_dialog.close()
-            QMessageBox.information(self, "完成", "云电脑已停止并自动删除成功")
             self.current_connection_info = None
             self.refresh_container()
-            return
-
-        # 删除失败，检查是否达到最大重试次数
-        if self.delete_attempts >= self.max_delete_attempts:
-            # 超过60秒，停止重试
-            self.delete_retry_timer.stop()
-            self.countdown_timer.stop()
-            if hasattr(self, "processing_dialog"):
-                self.processing_dialog.close()
-            QMessageBox.warning(
-                self,
-                "删除超时",
-                "等待已超过60秒，实例可能仍在关机中。\n请稍后手动刷新并删除实例。",
-            )
-            self.refresh_container()
-        # 否则继续等待，timer会在10秒后再次触发
+            if not self.status_timer.isActive():
+                self.status_timer.start(self.config.auto_refresh_interval * 1000)
 
     def open_remote_desktop(self):
         """打开远程桌面 - 一键自动连接"""
@@ -1223,6 +1223,11 @@ class MainWindow(QMainWindow):
             main_window = MainWindow()
             main_window.set_user_info(dialog.user_info)
             main_window.show()
+
+    def closeEvent(self, event):
+        """窗口关闭时清理定时器"""
+        self.status_timer.stop()
+        super().closeEvent(event)
 
 
 def main():

@@ -26,6 +26,12 @@ class User(Base):
     current_container_id = Column(
         Integer, ForeignKey("container_record.id"), nullable=True, comment="当前容器ID"
     )
+    container_operation_status = Column(
+        String(20), nullable=True, comment="容器操作状态：creating/deleting"
+    )
+    container_operation_started_at = Column(
+        DateTime(timezone=True), nullable=True, comment="容器操作开始时间"
+    )
     admin_id = Column(
         Integer, ForeignKey("m_admin.id"), nullable=False, comment="所属管理员ID"
     )

@@ -25,6 +25,15 @@ CONTAINER_RECORD_OPTIONAL_COLUMNS = {
     "config_name": "ALTER TABLE container_record ADD COLUMN config_name VARCHAR(100)",
 }
 
+USER_OPTIONAL_COLUMNS = {
+    "container_operation_status": (
+        "ALTER TABLE m_user ADD COLUMN container_operation_status VARCHAR(20)"
+    ),
+    "container_operation_started_at": (
+        "ALTER TABLE m_user ADD COLUMN container_operation_started_at DATETIME"
+    ),
+}
+
 
 async def get_db():
     """获取数据库会话"""
@@ -39,7 +48,24 @@ async def init_db():
     """初始化数据库"""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await ensure_user_columns(conn)
         await ensure_container_record_columns(conn)
+
+
+async def ensure_user_columns(conn) -> None:
+    """为旧版数据库补齐 m_user 缺失字段"""
+    result = await conn.execute(
+        text("SELECT name FROM sqlite_master WHERE type='table' AND name='m_user'")
+    )
+    if not result.scalar_one_or_none():
+        return
+
+    result = await conn.execute(text("PRAGMA table_info(m_user)"))
+    existing_columns = {row[1] for row in result.fetchall()}
+
+    for column_name, sql in USER_OPTIONAL_COLUMNS.items():
+        if column_name not in existing_columns:
+            await conn.execute(text(sql))
 
 
 async def ensure_container_record_columns(conn) -> None:
