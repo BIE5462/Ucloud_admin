@@ -91,6 +91,10 @@ class ContainerRecord(Base):
     ucloud_instance_id = Column(String(100), nullable=False, comment="UCloud实例ID")
     instance_name = Column(String(100), nullable=False, comment="实例名称")
     status = Column(String(20), default="creating", comment="状态")
+    server_id = Column(
+        Integer, ForeignKey("cloud_server.id"), nullable=True, comment="所属服务器ID"
+    )
+    server_name = Column(String(100), nullable=True, comment="所属服务器名称快照")
     config_code = Column(String(50), nullable=True, comment="套餐编码")
     config_name = Column(String(100), nullable=True, comment="套餐名称")
     gpu_type = Column(String(50), nullable=False, comment="GPU类型")
@@ -108,6 +112,24 @@ class ContainerRecord(Base):
     connection_port = Column(Integer, default=3389, comment="连接端口")
     connection_username = Column(String(50), nullable=True, comment="连接用户名")
     connection_password = Column(String(100), nullable=True, comment="连接密码")
+
+
+class CloudServer(Base):
+    """云服务器配置表"""
+
+    __tablename__ = "cloud_server"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True, index=True, comment="服务器名称")
+    ucloud_private_key = Column(String(255), nullable=False, comment="UCloud私钥")
+    ucloud_public_key = Column(String(255), nullable=False, comment="UCloud公钥")
+    ucloud_image_id = Column(String(100), nullable=False, comment="UCloud镜像ID")
+    created_by = Column(Integer, ForeignKey("m_admin.id"), nullable=True)
+    updated_by = Column(Integer, ForeignKey("m_admin.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class SystemConfig(Base):

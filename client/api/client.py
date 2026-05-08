@@ -293,7 +293,7 @@ class APIClient:
 
     # ==================== 认证接口 ====================
 
-    def login(self, phone: str, password: str) -> APIResult:
+    def login(self, server_name: str, phone: str, password: str) -> APIResult:
         """
         用户登录
 
@@ -302,7 +302,13 @@ class APIClient:
         """
         try:
             data = self._request(
-                "POST", "/auth/login", json={"phone": phone, "password": password}
+                "POST",
+                "/auth/login",
+                json={
+                    "server_name": server_name,
+                    "phone": phone,
+                    "password": password,
+                },
             )
             self.token = data["data"]["token"]
             return self._make_api_result(

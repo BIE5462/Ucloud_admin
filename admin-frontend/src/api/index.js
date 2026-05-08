@@ -203,6 +203,18 @@ export const updateConfig = (data) =>
 export const updatePrice = (data) => 
   api.put('/admin/config/price', data)
 
+export const getServerList = () =>
+  api.get('/admin/servers')
+
+export const createServer = (data) =>
+  api.post('/admin/servers', data)
+
+export const updateServer = (id, data) =>
+  api.put(`/admin/servers/${id}`, data)
+
+export const deleteServer = (id) =>
+  api.delete(`/admin/servers/${id}`)
+
 // 日志管理
 export const getContainerLogs = (params) =>
   api.get('/admin/logs/container', { params })

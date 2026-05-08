@@ -72,23 +72,88 @@
 
       <el-divider />
 
+      <div class="section-header">
+        <div class="section-title">服务器管理</div>
+        <el-button type="primary" @click="openServerDialog()">新增服务器</el-button>
+      </div>
+
+      <el-table
+        :data="servers"
+        v-loading="serverLoading"
+        border
+        class="config-table"
+      >
+        <el-table-column prop="name" label="服务器名称" width="160" />
+        <el-table-column prop="ucloud_public_key" label="UCLOUD_PUBLIC_KEY" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="ucloud_private_key_masked" label="UCLOUD_PRIVATE_KEY" width="180" />
+        <el-table-column prop="ucloud_image_id" label="UCLOUD_IMAGE_ID" min-width="220" show-overflow-tooltip />
+        <el-table-column label="操作" width="170" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" @click="openServerDialog(row)">编辑</el-button>
+            <el-button size="small" type="danger" @click="handleDeleteServer(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <el-divider />
+
       <div class="config-info">
         <h4>配置说明</h4>
         <ul>
           <li>套餐规格固定为 5 档，仅允许后台维护价格，客户端只能选择套餐编码。</li>
-          <li>镜像ID属于后台共享配置，所有套餐共用，客户端不展示也不允许修改。</li>
+          <li>服务器名称由客户端登录前手动输入，云电脑创建和后续操作都使用所属服务器的 UCloud 配置。</li>
+          <li>共享镜像ID仅用于兼容旧配置，实际创建使用服务器管理中的 UCLOUD_IMAGE_ID。</li>
           <li>价格和共享配置只影响新创建的实例，已创建实例继续保留创建时快照。</li>
           <li>所有系统配置变更都会记录到管理员操作日志中。</li>
         </ul>
       </div>
     </el-card>
+
+    <el-dialog
+      v-model="serverDialogVisible"
+      :title="serverForm.id ? '编辑服务器' : '新增服务器'"
+      width="560px"
+    >
+      <el-form :model="serverForm" label-width="150px">
+        <el-form-item label="服务器名称">
+          <el-input v-model="serverForm.name" placeholder="请输入服务器名称" />
+        </el-form-item>
+        <el-form-item label="UCLOUD_PUBLIC_KEY">
+          <el-input v-model="serverForm.ucloud_public_key" placeholder="请输入 UCLOUD_PUBLIC_KEY" />
+        </el-form-item>
+        <el-form-item label="UCLOUD_PRIVATE_KEY">
+          <el-input
+            v-model="serverForm.ucloud_private_key"
+            type="password"
+            show-password
+            :placeholder="serverForm.id ? '留空表示不修改' : '请输入 UCLOUD_PRIVATE_KEY'"
+          />
+        </el-form-item>
+        <el-form-item label="UCLOUD_IMAGE_ID">
+          <el-input v-model="serverForm.ucloud_image_id" placeholder="请输入 UCLOUD_IMAGE_ID" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="serverDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="serverSaving" @click="handleSaveServer">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { getConfig, updateConfig } from '@/api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  createServer,
+  deleteServer,
+  getConfig,
+  getServerList,
+  updateConfig,
+  updateServer
+} from '@/api'
 
 const defaultConfigOptions = [
   {
@@ -160,6 +225,17 @@ const config = ref({
 })
 
 const saving = ref(false)
+const servers = ref([])
+const serverLoading = ref(false)
+const serverSaving = ref(false)
+const serverDialogVisible = ref(false)
+const serverForm = ref({
+  id: null,
+  name: '',
+  ucloud_private_key: '',
+  ucloud_public_key: '',
+  ucloud_image_id: ''
+})
 
 const fetchConfig = async () => {
   const res = await getConfig()
@@ -170,6 +246,43 @@ const fetchConfig = async () => {
       config_options: normalizeConfigOptions(res.data.config_options)
     }
   }
+}
+
+const fetchServers = async () => {
+  serverLoading.value = true
+  try {
+    const res = await getServerList()
+    if (res.code === 200) {
+      servers.value = res.data.items || []
+    }
+  } finally {
+    serverLoading.value = false
+  }
+}
+
+const resetServerForm = () => {
+  serverForm.value = {
+    id: null,
+    name: '',
+    ucloud_private_key: '',
+    ucloud_public_key: '',
+    ucloud_image_id: ''
+  }
+}
+
+const openServerDialog = (server = null) => {
+  if (server) {
+    serverForm.value = {
+      id: server.id,
+      name: server.name,
+      ucloud_private_key: '',
+      ucloud_public_key: server.ucloud_public_key,
+      ucloud_image_id: server.ucloud_image_id
+    }
+  } else {
+    resetServerForm()
+  }
+  serverDialogVisible.value = true
 }
 
 const handleSave = async () => {
@@ -216,7 +329,73 @@ const handleSave = async () => {
   }
 }
 
-onMounted(fetchConfig)
+const handleSaveServer = async () => {
+  const name = serverForm.value.name.trim()
+  const publicKey = serverForm.value.ucloud_public_key.trim()
+  const privateKey = serverForm.value.ucloud_private_key.trim()
+  const imageId = serverForm.value.ucloud_image_id.trim()
+
+  if (!name) {
+    ElMessage.warning('服务器名称不能为空')
+    return
+  }
+  if (!publicKey) {
+    ElMessage.warning('UCLOUD_PUBLIC_KEY不能为空')
+    return
+  }
+  if (!serverForm.value.id && !privateKey) {
+    ElMessage.warning('UCLOUD_PRIVATE_KEY不能为空')
+    return
+  }
+  if (!imageId) {
+    ElMessage.warning('UCLOUD_IMAGE_ID不能为空')
+    return
+  }
+
+  const payload = {
+    name,
+    ucloud_public_key: publicKey,
+    ucloud_image_id: imageId
+  }
+  if (privateKey) {
+    payload.ucloud_private_key = privateKey
+  }
+
+  serverSaving.value = true
+  try {
+    if (serverForm.value.id) {
+      await updateServer(serverForm.value.id, payload)
+      ElMessage.success('服务器更新成功')
+    } else {
+      await createServer(payload)
+      ElMessage.success('服务器创建成功')
+    }
+    serverDialogVisible.value = false
+    await fetchServers()
+  } finally {
+    serverSaving.value = false
+  }
+}
+
+const handleDeleteServer = async (server) => {
+  await ElMessageBox.confirm(
+    `确定删除服务器“${server.name}”吗？有关联云电脑时后端会阻止删除。`,
+    '删除确认',
+    {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  )
+  await deleteServer(server.id)
+  ElMessage.success('服务器删除成功')
+  await fetchServers()
+}
+
+onMounted(() => {
+  fetchConfig()
+  fetchServers()
+})
 </script>
 
 <style scoped>
@@ -233,6 +412,17 @@ onMounted(fetchConfig)
   font-size: 16px;
   font-weight: 600;
   color: #303133;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.section-header .section-title {
+  margin-bottom: 0;
 }
 
 .form-tip {

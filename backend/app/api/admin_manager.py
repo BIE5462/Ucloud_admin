@@ -12,7 +12,7 @@ from app.schemas.schemas import (
 )
 from app.services.crud_service import admin_service, log_service
 from app.core.security import get_password_hash
-from app.models.models import Admin, BalanceLog
+from app.models.models import BalanceLog
 
 router = APIRouter(prefix="/admin/admins", tags=["管理员管理"])
 
@@ -162,7 +162,7 @@ async def update_admin(
         admin_id,
         old_value=old_value,
         new_value=new_value,
-        description=f"更新管理员信息",
+        description="更新管理员信息",
     )
 
     return ResponseData(code=200, message="更新成功")

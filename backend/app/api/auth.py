@@ -11,7 +11,12 @@ from app.core.security import (
     decode_token,
 )
 from app.schemas.schemas import UserLogin, AdminLogin, ResponseData
-from app.services.crud_service import user_service, admin_service, log_service
+from app.services.crud_service import (
+    admin_service,
+    cloud_server_service,
+    log_service,
+    user_service,
+)
 from app.models.models import User, Admin
 
 router = APIRouter(prefix="/auth", tags=["认证"])
@@ -39,9 +44,15 @@ async def get_current_user(
         )
 
     user_id = payload.get("user_id")
+    server_id = payload.get("server_id")
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的Token"
+        )
+    if not server_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token缺少服务器信息，请重新登录",
         )
 
     user = await user_service.get_by_id(db, user_id)
@@ -50,6 +61,16 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在或已被禁用"
         )
 
+    server = await cloud_server_service.get_by_id(db, server_id)
+    if not server:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="登录服务器不存在，请重新登录",
+        )
+
+    user.login_server_id = server.id
+    user.login_server_name = server.name
+    user.login_server = server
     return user
 
 
@@ -98,8 +119,24 @@ async def user_login(
 ):
     """用户登录"""
     user = await user_service.get_by_phone(db, login_data.phone)
+    server = await cloud_server_service.get_by_name(db, login_data.server_name)
     ip_address = get_request_ip(request)
     user_agent = request.headers.get("user-agent")
+
+    if not server:
+        await log_service.create_user_login_log(
+            db,
+            phone=login_data.phone,
+            login_status="failed",
+            user_id=user.id if user else None,
+            admin_id=user.admin_id if user else None,
+            failure_reason="服务器不存在",
+            ip_address=ip_address,
+            user_agent=user_agent,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="服务器不存在"
+        )
 
     if not user:
         await log_service.create_user_login_log(
@@ -161,7 +198,13 @@ async def user_login(
 
     # 生成Token
     access_token = create_access_token(
-        {"user_id": user.id, "phone": user.phone, "type": "user"}
+        {
+            "user_id": user.id,
+            "phone": user.phone,
+            "server_id": server.id,
+            "server_name": server.name,
+            "type": "user",
+        }
     )
 
     return ResponseData(
@@ -178,6 +221,7 @@ async def user_login(
                 "phone": user.phone,
                 "balance": user.balance,
                 "current_container_id": user.current_container_id,
+                "server_name": server.name,
             },
         },
     )
@@ -228,7 +272,11 @@ async def admin_login(
 
 
 @router.post("/logout", response_model=ResponseData)
-async def logout(current_user: User = Depends(get_current_user)):
+async def logout(credentials: HTTPAuthorizationCredentials = Depends(security)):
     """退出登录"""
+    if not decode_token(credentials.credentials):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的Token"
+        )
     # JWT方式不需要服务器端处理，客户端删除Token即可
     return ResponseData(code=200, message="退出成功")

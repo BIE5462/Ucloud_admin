@@ -8,6 +8,7 @@ from app.models.models import (
     User,
     Admin,
     ContainerRecord,
+    CloudServer,
     SystemConfig,
     ContainerLog,
     AdminOperationLog,
@@ -324,6 +325,8 @@ class ContainerService:
             status="running",
             started_at=datetime.utcnow(),
             stopped_at=None,
+            server_id=container_data.get("server_id"),
+            server_name=container_data.get("server_name"),
             config_code=container_data.get("config_code"),
             config_name=container_data.get("config_name"),
             gpu_type=container_data["gpu_type"],
@@ -445,6 +448,155 @@ class ContainerService:
         for status, count in result.all():
             counts[status] = count
         return counts
+
+
+class CloudServerService:
+    """云服务器配置服务"""
+
+    DEFAULT_SERVER_NAME = "默认服务器"
+
+    @staticmethod
+    def normalize_name(name: str) -> str:
+        return str(name).strip()
+
+    @staticmethod
+    def mask_private_key(private_key: str) -> str:
+        if not private_key:
+            return ""
+        if len(private_key) <= 8:
+            return "*" * len(private_key)
+        return f"{private_key[:4]}{'*' * 8}{private_key[-4:]}"
+
+    @staticmethod
+    def serialize(server: CloudServer) -> dict:
+        return {
+            "id": server.id,
+            "name": server.name,
+            "ucloud_public_key": server.ucloud_public_key,
+            "ucloud_private_key_masked": CloudServerService.mask_private_key(
+                server.ucloud_private_key
+            ),
+            "ucloud_image_id": server.ucloud_image_id,
+            "created_at": server.created_at,
+            "updated_at": server.updated_at,
+        }
+
+    @staticmethod
+    async def get_by_id(
+        db: AsyncSession, server_id: int
+    ) -> Optional[CloudServer]:
+        result = await db.execute(select(CloudServer).where(CloudServer.id == server_id))
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def get_by_name(
+        db: AsyncSession, name: str
+    ) -> Optional[CloudServer]:
+        normalized_name = CloudServerService.normalize_name(name)
+        result = await db.execute(
+            select(CloudServer).where(CloudServer.name == normalized_name)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def list_servers(db: AsyncSession) -> List[CloudServer]:
+        result = await db.execute(select(CloudServer).order_by(CloudServer.id.asc()))
+        return result.scalars().all()
+
+    @staticmethod
+    async def create(
+        db: AsyncSession, server_data: dict, admin_id: int = None
+    ) -> CloudServer:
+        server = CloudServer(
+            name=CloudServerService.normalize_name(server_data["name"]),
+            ucloud_private_key=server_data["ucloud_private_key"].strip(),
+            ucloud_public_key=server_data["ucloud_public_key"].strip(),
+            ucloud_image_id=server_data["ucloud_image_id"].strip(),
+            created_by=admin_id,
+            updated_by=admin_id,
+        )
+        db.add(server)
+        await db.commit()
+        await db.refresh(server)
+        return server
+
+    @staticmethod
+    async def update(
+        db: AsyncSession,
+        server: CloudServer,
+        server_data: dict,
+        admin_id: int = None,
+    ) -> CloudServer:
+        server.name = CloudServerService.normalize_name(server_data["name"])
+        server.ucloud_public_key = server_data["ucloud_public_key"].strip()
+        server.ucloud_image_id = server_data["ucloud_image_id"].strip()
+        if server_data.get("ucloud_private_key"):
+            server.ucloud_private_key = server_data["ucloud_private_key"].strip()
+        server.updated_by = admin_id
+        await db.commit()
+        await db.refresh(server)
+        return server
+
+    @staticmethod
+    async def delete(db: AsyncSession, server: CloudServer) -> None:
+        await db.delete(server)
+        await db.commit()
+
+    @staticmethod
+    async def has_active_containers(db: AsyncSession, server_id: int) -> bool:
+        result = await db.execute(
+            select(func.count())
+            .select_from(ContainerRecord)
+            .where(
+                and_(
+                    ContainerRecord.server_id == server_id,
+                    ContainerRecord.deleted_at.is_(None),
+                )
+            )
+        )
+        return result.scalar_one() > 0
+
+    @staticmethod
+    async def ensure_default_server(db: AsyncSession) -> CloudServer:
+        servers = await CloudServerService.list_servers(db)
+        if servers:
+            default_server = servers[0]
+        else:
+            config = await ConfigService.get_config(db, "comp_share_image_id")
+            image_id = (
+                ConfigService._parse_text_value(
+                    config.config_value if config else None,
+                    settings.DEFAULT_COMP_SHARE_IMAGE_ID,
+                )
+            )
+            default_server = await CloudServerService.create(
+                db,
+                {
+                    "name": CloudServerService.DEFAULT_SERVER_NAME,
+                    "ucloud_private_key": settings.UCLOUD_PRIVATE_KEY,
+                    "ucloud_public_key": settings.UCLOUD_PUBLIC_KEY,
+                    "ucloud_image_id": image_id,
+                },
+            )
+
+        await CloudServerService.bind_legacy_containers(db, default_server)
+        return default_server
+
+    @staticmethod
+    async def bind_legacy_containers(
+        db: AsyncSession, default_server: CloudServer
+    ) -> None:
+        result = await db.execute(
+            select(ContainerRecord).where(ContainerRecord.server_id.is_(None))
+        )
+        containers = result.scalars().all()
+        if not containers:
+            return
+
+        for container in containers:
+            container.server_id = default_server.id
+            container.server_name = default_server.name
+        await db.commit()
 
 
 class ConfigService:
@@ -690,7 +842,6 @@ class ConfigService:
             raise ValueError(f"未知套餐编码: {config_code}")
 
         return {
-            "comp_share_image_id": configs["comp_share_image_id"],
             "config_code": selected_option["config_code"],
             "config_name": selected_option["config_name"],
             "gpu_type": selected_option["gpu_type"],
@@ -797,5 +948,6 @@ class LogService:
 user_service = UserService()
 admin_service = AdminService()
 container_service = ContainerService()
+cloud_server_service = CloudServerService()
 config_service = ConfigService()
 log_service = LogService()

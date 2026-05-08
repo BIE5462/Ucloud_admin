@@ -23,6 +23,8 @@ Base = declarative_base()
 CONTAINER_RECORD_OPTIONAL_COLUMNS = {
     "config_code": "ALTER TABLE container_record ADD COLUMN config_code VARCHAR(50)",
     "config_name": "ALTER TABLE container_record ADD COLUMN config_name VARCHAR(100)",
+    "server_id": "ALTER TABLE container_record ADD COLUMN server_id INTEGER",
+    "server_name": "ALTER TABLE container_record ADD COLUMN server_name VARCHAR(100)",
 }
 
 USER_OPTIONAL_COLUMNS = {
@@ -50,6 +52,11 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
         await ensure_user_columns(conn)
         await ensure_container_record_columns(conn)
+
+    from app.services.crud_service import cloud_server_service
+
+    async with AsyncSessionLocal() as session:
+        await cloud_server_service.ensure_default_server(session)
 
 
 async def ensure_user_columns(conn) -> None:

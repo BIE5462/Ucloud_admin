@@ -26,18 +26,22 @@ def test_health():
         return False
 
 
-def user_login(phone="123456789", password="123456789"):
+def user_login(phone="123456789", password="123456789", server_name="默认服务器"):
     """用户登录，获取 Token"""
     print("\n" + "=" * 60)
     print("步骤 2: 用户登录获取 Token")
     print("=" * 60)
     print(f"请求: POST {BASE_URL}/api/auth/login")
-    print(f"参数: phone={phone}, password={password}")
+    print(f"参数: server_name={server_name}, phone={phone}, password={password}")
 
     try:
         resp = requests.post(
             f"{BASE_URL}/api/auth/login",
-            json={"phone": phone, "password": password},
+            json={
+                "server_name": server_name,
+                "phone": phone,
+                "password": password,
+            },
             headers={"Content-Type": "application/json"},
             timeout=10,
         )

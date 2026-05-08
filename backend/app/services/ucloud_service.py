@@ -1,5 +1,4 @@
 import base64
-from ucloud.core import exc
 from ucloud.client import Client
 from app.core.config import get_settings
 
@@ -9,18 +8,21 @@ settings = get_settings()
 class UCloudService:
     """UCloud服务封装"""
 
-    def __init__(self):
-        self.client = Client(
+    @staticmethod
+    def build_client(server):
+        """根据服务器配置构建 UCloud 客户端"""
+        return Client(
             {
                 "region": settings.UCLOUD_REGION,
-                "public_key": settings.UCLOUD_PUBLIC_KEY,
-                "private_key": settings.UCLOUD_PRIVATE_KEY,
+                "public_key": server.ucloud_public_key,
+                "private_key": server.ucloud_private_key,
                 "base_url": settings.UCLOUD_BASE_URL,
             }
         )
 
     async def create_container(
         self,
+        server,
         instance_name: str,
         create_config: dict,
     ) -> dict:
@@ -30,14 +32,14 @@ class UCloudService:
         参考 Ucloud_SDK_example.py 中的创建方式。
         """
         try:
+            client = self.build_client(server)
             # 创建容器实例 - 核心规格来自系统配置
             create_payload = self.build_create_payload(
+                server=server,
                 instance_name=instance_name,
                 create_config=create_config,
             )
-            create_resp = self.client.ucompshare().create_comp_share_instance(
-                create_payload
-            )
+            create_resp = client.ucompshare().create_comp_share_instance(create_payload)
 
             # 获取新创建的实例ID
             instance_ids = create_resp.get("UHostIds")
@@ -46,7 +48,7 @@ class UCloudService:
                 return {"success": False, "error": "创建失败，未返回实例ID"}
 
             # 查询实例详情
-            describe_resp = self.client.ucompshare().describe_comp_share_instance(
+            describe_resp = client.ucompshare().describe_comp_share_instance(
                 {
                     "UHostIds": instance_ids,
                 }
@@ -67,12 +69,12 @@ class UCloudService:
             return {"success": False, "error": str(e)}
 
     @staticmethod
-    def build_create_payload(instance_name: str, create_config: dict) -> dict:
+    def build_create_payload(server, instance_name: str, create_config: dict) -> dict:
         """构建创建容器实例的请求参数"""
         return {
             "Zone": "cn-wlcb-01",
             "MachineType": "G",
-            "CompShareImageId": create_config["comp_share_image_id"],
+            "CompShareImageId": server.ucloud_image_id,
             "GPU": 1,
             "GpuType": create_config["gpu_type"],
             "CPU": create_config["cpu_cores"],
@@ -88,10 +90,11 @@ class UCloudService:
             "Name": instance_name,
         }
 
-    async def start_container(self, instance_id: str) -> dict:
+    async def start_container(self, server, instance_id: str) -> dict:
         """启动容器实例"""
         try:
-            start_resp = self.client.ucompshare().start_comp_share_instance(
+            client = self.build_client(server)
+            start_resp = client.ucompshare().start_comp_share_instance(
                 {
                     "Region": settings.UCLOUD_REGION,
                     "Zone": settings.UCLOUD_ZONE,
@@ -101,7 +104,7 @@ class UCloudService:
 
             if start_resp:
                 # 获取最新的连接信息
-                describe_resp = self.client.ucompshare().describe_comp_share_instance(
+                describe_resp = client.ucompshare().describe_comp_share_instance(
                     {
                         "UHostIds": [instance_id],
                     }
@@ -122,10 +125,11 @@ class UCloudService:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    async def stop_container(self, instance_id: str) -> dict:
+    async def stop_container(self, server, instance_id: str) -> dict:
         """停止容器实例"""
         try:
-            stop_resp = self.client.ucompshare().stop_comp_share_instance(
+            client = self.build_client(server)
+            stop_resp = client.ucompshare().stop_comp_share_instance(
                 {
                     "Region": settings.UCLOUD_REGION,
                     "Zone": settings.UCLOUD_ZONE,
@@ -141,10 +145,11 @@ class UCloudService:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-    async def delete_container(self, instance_id: str) -> dict:
+    async def delete_container(self, server, instance_id: str) -> dict:
         """删除容器实例"""
         try:
-            delete_resp = self.client.ucompshare().terminate_comp_share_instance(
+            client = self.build_client(server)
+            delete_resp = client.ucompshare().terminate_comp_share_instance(
                 {
                     "Region": settings.UCLOUD_REGION,
                     "Zone": settings.UCLOUD_ZONE,
@@ -164,10 +169,11 @@ class UCloudService:
                 return {"success": True, "already_deleted": True}
             return {"success": False, "error": str(e)}
 
-    async def get_instance_info(self, instance_id: str) -> dict:
+    async def get_instance_info(self, server, instance_id: str) -> dict:
         """获取实例信息"""
         try:
-            describe_resp = self.client.ucompshare().describe_comp_share_instance(
+            client = self.build_client(server)
+            describe_resp = client.ucompshare().describe_comp_share_instance(
                 {
                     "UHostIds": [instance_id],
                 }

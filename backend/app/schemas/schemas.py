@@ -1,5 +1,4 @@
 from datetime import datetime
-from decimal import Decimal
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -19,8 +18,17 @@ class ResponseData(ResponseBase):
 
 # ==================== 用户相关 ====================
 class UserLogin(BaseModel):
+    server_name: str
     phone: str
     password: str
+
+    @field_validator("server_name")
+    @classmethod
+    def validate_server_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("服务器名称不能为空")
+        return value
 
 
 class UserCreate(BaseModel):
@@ -132,6 +140,55 @@ class ConfigOptionInfo(ConfigPriceItem):
     cpu_cores: int
     memory_gb: int
     storage_gb: int
+
+
+class CloudServerCreate(BaseModel):
+    name: str
+    ucloud_private_key: str
+    ucloud_public_key: str
+    ucloud_image_id: str
+
+    @field_validator("name", "ucloud_private_key", "ucloud_public_key", "ucloud_image_id")
+    @classmethod
+    def validate_non_empty_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("配置项不能为空")
+        return value
+
+
+class CloudServerUpdate(BaseModel):
+    name: str
+    ucloud_private_key: Optional[str] = None
+    ucloud_public_key: str
+    ucloud_image_id: str
+
+    @field_validator("name", "ucloud_public_key", "ucloud_image_id")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("配置项不能为空")
+        return value
+
+    @field_validator("ucloud_private_key")
+    @classmethod
+    def validate_optional_private_key(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+
+        value = value.strip()
+        return value or None
+
+
+class CloudServerInfo(BaseModel):
+    id: int
+    name: str
+    ucloud_public_key: str
+    ucloud_private_key_masked: str
+    ucloud_image_id: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class ContainerCreate(BaseModel):

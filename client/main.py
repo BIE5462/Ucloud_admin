@@ -88,6 +88,26 @@ class LoginDialog(QDialog):
         subtitle.setStyleSheet("color: #909399; font-size: 14px; margin-bottom: 20px;")
         layout.addWidget(subtitle)
 
+        # 服务器名称
+        server_label = QLabel("服务器名称:")
+        server_label.setStyleSheet("color: #606266; font-weight: bold;")
+        layout.addWidget(server_label)
+
+        self.server_input = QLineEdit()
+        self.server_input.setPlaceholderText("请输入服务器名称")
+        self.server_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 1px solid #DCDFE6;
+                border-radius: 4px;
+                font-size: 14px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #409EFF;
+            }
+        """)
+        layout.addWidget(self.server_input)
+
         # 手机号
         phone_label = QLabel("手机号-账号:")
         phone_label.setStyleSheet("color: #606266; font-weight: bold;")
@@ -152,18 +172,9 @@ class LoginDialog(QDialog):
         self.login_btn.clicked.connect(self.handle_login)
         layout.addWidget(self.login_btn)
 
-        # 提示信息
-        tips = QLabel("测试账号: 请联系管理员创建")
-        tips.setAlignment(Qt.AlignCenter)
-        tips.setStyleSheet("color: #C0C4CC; font-size: 12px; margin-top: 15px;")
-        layout.addWidget(tips)
 
-        # 配置信息
-        config = get_config()
-        api_label = QLabel(f"API: {config.api_base_url}")
-        api_label.setAlignment(Qt.AlignCenter)
-        api_label.setStyleSheet("color: #DCDFE6; font-size: 10px; margin-top: 5px;")
-        layout.addWidget(api_label)
+
+
 
         self.setLayout(layout)
 
@@ -172,8 +183,13 @@ class LoginDialog(QDialog):
 
     def handle_login(self):
         """处理登录"""
+        server_name = self.server_input.text().strip()
         phone = self.phone_input.text().strip()
         password = self.pwd_input.text().strip()
+
+        if not server_name:
+            QMessageBox.warning(self, "提示", "请输入服务器名称")
+            return
 
         if not phone:
             QMessageBox.warning(self, "提示", "请输入手机号")
@@ -187,7 +203,7 @@ class LoginDialog(QDialog):
         self.login_btn.setText("登录中...")
 
         try:
-            result = api_client.login(phone, password)
+            result = api_client.login(server_name, phone, password)
 
             if result.is_ok():
                 self.user_info = result.data.get("user", {})
@@ -436,11 +452,16 @@ class MainWindow(QMainWindow):
         self.company_label.setFont(QFont("Microsoft YaHei", 12))
         self.company_label.setStyleSheet("color: #303133;")
 
+        self.server_label = QLabel("服务器: -")
+        self.server_label.setFont(QFont("Microsoft YaHei", 12))
+        self.server_label.setStyleSheet("color: #606266;")
+
         self.balance_label = QLabel("余额: ¥0.00")
         self.balance_label.setFont(QFont("Microsoft YaHei", 12))
         self.balance_label.setStyleSheet("color: #67C23A; font-weight: bold;")
 
         top_layout.addWidget(self.company_label)
+        top_layout.addWidget(self.server_label)
         top_layout.addStretch()
         top_layout.addWidget(self.balance_label)
 
@@ -712,6 +733,7 @@ class MainWindow(QMainWindow):
         """设置用户信息"""
         self.user_info = user_info
         self.company_label.setText(f"公司: {user_info.get('company_name', '-')}")
+        self.server_label.setText(f"服务器: {user_info.get('server_name', '-')}")
         self.balance_label.setText(f"余额: ¥{user_info.get('balance', 0):.2f}")
         self.refresh_container()
 

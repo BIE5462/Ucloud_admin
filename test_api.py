@@ -145,12 +145,19 @@ def test_user_login():
     print("测试5: 用户登录")
     print("=" * 50)
     print(f"请求URL: {BASE_URL}/api/auth/login")
-    print(f"请求数据: {{'phone': '13800138000', 'password': '13800138000'}}")
+    print(
+        "请求数据: {'server_name': '默认服务器', "
+        "'phone': '13800138000', 'password': '13800138000'}"
+    )
 
     try:
         resp = requests.post(
             f"{BASE_URL}/api/auth/login",
-            json={"phone": "admin", "password": "Admin123@"},
+            json={
+                "server_name": "默认服务器",
+                "phone": "admin",
+                "password": "Admin123@",
+            },
             headers={"Content-Type": "application/json"},
             timeout=10,
         )

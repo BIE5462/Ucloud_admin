@@ -5,9 +5,9 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from app.db.database import AsyncSessionLocal
 from app.services.crud_service import (
+    cloud_server_service,
     container_service,
     user_service,
-    config_service,
     admin_service,
 )
 from app.services.ucloud_service import ucloud_service
@@ -41,11 +41,20 @@ async def charge_running_containers():
                 if not admin:
                     continue
 
+                server = await cloud_server_service.get_by_id(db, container.server_id)
+                if not server:
+                    logger.warning(
+                        "容器 %s 所属服务器不存在，跳过自动停机",
+                        container.ucloud_instance_id,
+                    )
+                    continue
+
                 # 检查管理员余额是否足够
                 if admin.balance < container.price_per_minute:
                     # 余额不足，停止实例
                     result = await ucloud_service.stop_container(
-                        container.ucloud_instance_id
+                        server,
+                        container.ucloud_instance_id,
                     )
 
                     if result["success"]:
@@ -116,8 +125,17 @@ async def process_pending_container_deletions():
                 if not user:
                     continue
 
+                server = await cloud_server_service.get_by_id(db, container.server_id)
+                if not server:
+                    logger.warning(
+                        "容器 %s 所属服务器不存在，跳过删除补偿",
+                        container.ucloud_instance_id,
+                    )
+                    continue
+
                 result = await ucloud_service.delete_container(
-                    container.ucloud_instance_id
+                    server,
+                    container.ucloud_instance_id,
                 )
                 if not result["success"]:
                     logger.warning(

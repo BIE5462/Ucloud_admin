@@ -6,8 +6,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.db.database import init_db, AsyncSessionLocal, engine, ensure_container_record_columns
-from app.services.crud_service import admin_service, config_service
-from app.core.security import get_password_hash
+from app.services.crud_service import admin_service, cloud_server_service, config_service
 from app.core.config import get_settings
 from app.models.models import (
     Base,
@@ -193,6 +192,7 @@ async def create_default_data():
                 config_service.get_config_price_key(item["config_code"]),
                 str(settings.DEFAULT_PRICE_PER_MINUTE),
             )
+        await cloud_server_service.ensure_default_server(db)
         print("系统配置初始化完成")
 
         print("\n默认配置:")

@@ -22,6 +22,27 @@ from app.models.models import User
 router = APIRouter(prefix="/container", tags=["容器管理"])
 
 
+async def _get_login_server(current_user: User):
+    """获取当前登录选择的服务器"""
+    server = getattr(current_user, "login_server", None)
+    if not server:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="登录服务器信息无效，请重新登录",
+        )
+    return server
+
+
+def _ensure_container_server(container, server) -> None:
+    """确保操作使用容器所属服务器"""
+    if container.server_id and container.server_id != server.id:
+        server_name = container.server_name or "原服务器"
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"当前云电脑属于 {server_name} 服务器，请使用该服务器登录后操作",
+        )
+
+
 def _extract_container_validation_message(exc: ValidationError) -> str:
     """提取创建容器请求的首个校验错误信息"""
     first_error = exc.errors()[0] if exc.errors() else {}
@@ -45,6 +66,7 @@ def _serialize_container(container) -> dict:
         "id": container.id,
         "instance_name": container.instance_name,
         "status": container.status,
+        "server_name": container.server_name,
         "config_code": container.config_code,
         "config_name": container.config_name,
         "gpu_type": container.gpu_type,
@@ -91,6 +113,7 @@ async def get_container_config_options(
     current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
 ):
     """获取用户可选套餐列表"""
+    await _get_login_server(current_user)
     configs = await config_service.get_all_configs(db)
     return ResponseData(
         code=200,
@@ -109,6 +132,7 @@ async def get_my_container(
     """获取我的云电脑"""
     await db.refresh(current_user)
     await user_service.clear_stale_container_operation(db, current_user)
+    server = await _get_login_server(current_user)
     container = await container_service.get_by_user_id(db, current_user.id)
 
     if not container:
@@ -121,6 +145,7 @@ async def get_my_container(
             },
         )
 
+    _ensure_container_server(container, server)
     return ResponseData(
         code=200,
         message="success",
@@ -138,12 +163,14 @@ async def get_container_status(
 ):
     """获取云电脑实时状态"""
     container = await container_service.get_by_user_id(db, current_user.id)
+    server = await _get_login_server(current_user)
 
     if not container:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="云电脑不存在"
         )
 
+    _ensure_container_server(container, server)
     # 计算本次运行统计
     stats = await container_service.calculate_session_stats(db, container)
 
@@ -196,6 +223,7 @@ async def create_container(
 
     await db.refresh(current_user)
     await user_service.clear_stale_container_operation(db, current_user)
+    server = await _get_login_server(current_user)
 
     if current_user.container_operation_status == "creating":
         raise HTTPException(
@@ -210,6 +238,7 @@ async def create_container(
     # 检查是否已有容器
     existing = await container_service.get_by_user_id(db, current_user.id)
     if existing:
+        _ensure_container_server(existing, server)
         if existing.status == "deleting":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -235,7 +264,8 @@ async def create_container(
         try:
             # 1. 调用 UCloud API 删除实例
             delete_result = await ucloud_service.delete_container(
-                existing.ucloud_instance_id
+                server,
+                existing.ucloud_instance_id,
             )
             if not delete_result["success"]:
                 raise HTTPException(
@@ -293,8 +323,9 @@ async def create_container(
                 detail=str(exc),
             ) from exc
 
-        # 调用UCloud创建实例 - 规格参数来自固定套餐，共享镜像来自后台配置
+        # 调用UCloud创建实例 - 规格参数来自固定套餐，镜像来自登录服务器
         result = await ucloud_service.create_container(
+            server=server,
             instance_name=container_data.instance_name,
             create_config=container_create_config,
         )
@@ -312,6 +343,8 @@ async def create_container(
             {
                 "instance_id": result["instance_id"],
                 "instance_name": container_data.instance_name,
+                "server_id": server.id,
+                "server_name": server.name,
                 "config_code": container_create_config["config_code"],
                 "config_name": container_create_config["config_name"],
                 "gpu_type": container_create_config["gpu_type"],
@@ -346,6 +379,7 @@ async def create_container(
             data={
                 "container_id": container.id,
                 "status": container.status,
+                "server_name": container.server_name,
                 "config_code": container.config_code,
                 "config_name": container.config_name,
                 "started_at": container.started_at.isoformat()
@@ -375,12 +409,14 @@ async def start_container(
 ):
     """启动云电脑"""
     container = await container_service.get_by_user_id(db, current_user.id)
+    server = await _get_login_server(current_user)
 
     if not container:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="云电脑不存在"
         )
 
+    _ensure_container_server(container, server)
     if container.status == "running":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="云电脑已在运行中"
@@ -405,7 +441,7 @@ async def start_container(
         )
 
     # 调用UCloud启动实例
-    result = await ucloud_service.start_container(container.ucloud_instance_id)
+    result = await ucloud_service.start_container(server, container.ucloud_instance_id)
 
     if not result["success"]:
         raise HTTPException(
@@ -459,19 +495,21 @@ async def stop_container(
 ):
     """停止云电脑"""
     container = await container_service.get_by_user_id(db, current_user.id)
+    server = await _get_login_server(current_user)
 
     if not container:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="云电脑不存在"
         )
 
+    _ensure_container_server(container, server)
     if container.status != "running":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="云电脑未在运行中"
         )
 
     # 调用UCloud停止实例
-    result = await ucloud_service.stop_container(container.ucloud_instance_id)
+    result = await ucloud_service.stop_container(server, container.ucloud_instance_id)
 
     if not result["success"]:
         raise HTTPException(
@@ -533,6 +571,7 @@ async def delete_container(
     """删除云电脑"""
     await db.refresh(current_user)
     await user_service.clear_stale_container_operation(db, current_user)
+    server = await _get_login_server(current_user)
     container = await container_service.get_by_user_id(db, current_user.id)
 
     if not container:
@@ -540,6 +579,7 @@ async def delete_container(
             status_code=status.HTTP_404_NOT_FOUND, detail="云电脑不存在"
         )
 
+    _ensure_container_server(container, server)
     if not delete_request.confirm:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="请确认删除"
@@ -572,7 +612,9 @@ async def delete_container(
         )
 
         # 停止UCloud实例
-        stop_result = await ucloud_service.stop_container(container.ucloud_instance_id)
+        stop_result = await ucloud_service.stop_container(
+            server, container.ucloud_instance_id
+        )
         if not stop_result["success"]:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -589,7 +631,7 @@ async def delete_container(
     await db.commit()
 
     # 先尝试立即删除，失败则交由后台补偿任务继续处理
-    result = await ucloud_service.delete_container(container.ucloud_instance_id)
+    result = await ucloud_service.delete_container(server, container.ucloud_instance_id)
 
     if not result["success"]:
         await log_service.create_container_log(
